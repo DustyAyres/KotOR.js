@@ -686,17 +686,17 @@ export class InGameOverlay extends GameMenu {
       if (GameState.CursorManager.selectedObject.isHostile(GameState.getCurrentPlayer()) && this.PB_HEALTH.getFillTextureName() == 'friend_bar') {
         this.PB_HEALTH.setFillTextureName('enemy_bar');
         this.PB_HEALTH.setFillTexture(preloadTexturesMap.get('enemy_bar'));
-        this.namePlateArrowMaterial.map = preloadTexturesMap.get('hostilearrow');
+        if (this.namePlateArrowMaterial) this.namePlateArrowMaterial.map = preloadTexturesMap.get('hostilearrow');
       } else if (!GameState.CursorManager.selectedObject.isHostile(GameState.getCurrentPlayer()) && this.PB_HEALTH.getFillTextureName() == 'enemy_bar') {
         this.PB_HEALTH.setFillTextureName('friend_bar');
         this.PB_HEALTH.setFillTexture(preloadTexturesMap.get('friend_bar'));
-        this.namePlateArrowMaterial.map = preloadTexturesMap.get('friendlyarrow');
+        if (this.namePlateArrowMaterial) this.namePlateArrowMaterial.map = preloadTexturesMap.get('friendlyarrow');
       }
     } else {
       if (this.PB_HEALTH.getFillTextureName() != 'friend_bar') {
         this.PB_HEALTH.setFillTextureName('friend_bar');
         this.PB_HEALTH.setFillTexture(preloadTexturesMap.get('friend_bar'));
-        this.namePlateArrowMaterial.map = preloadTexturesMap.get('friendlyarrow');
+        if (this.namePlateArrowMaterial) this.namePlateArrowMaterial.map = preloadTexturesMap.get('friendlyarrow');
       }
     }
     if (this.manager.InGameOverlay.LBL_NAME.text.text != GameState.CursorManager.selectedObject.getName()) {
