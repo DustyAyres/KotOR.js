@@ -19,6 +19,7 @@ import { TextSprite3D } from "@/engine/TextSprite3D";
 import { BitWise } from "@/utility/BitWise";
 import { CombatAttackData } from "@/combat/CombatAttackData";
 import type { CombatRoundAction } from "@/combat/CombatRoundAction";
+import type { TalentFeat } from "@/talents";
 import { GameState } from "@/GameState";
 import { FeedbackMessageEntry } from "@/engine/FeedbackMessageEntry";
 import { FeebackMessageColor } from "@/enums/engine/FeedbackMessageColor";
@@ -501,14 +502,43 @@ export class CombatRound {
   }
 
   /**
+   * The critical threat-range WIDTH multiplier from the active attack form (dump
+   * FUN_006afa60). Critical Strike and Sniper Shot multiply the weapon's base threat
+   * width by 2 / 3 / 4 across the basic / improved / master tiers; every other form
+   * (or none) leaves it ×1.
+   * @param feat - The active attack form for this round
+   * @returns The threat-width multiplier (1, 2, 3 or 4)
+   */
+  getThreatWidthMultiplier(feat?: TalentFeat): number {
+    if(!feat) return 1;
+    switch(feat.id){
+      case CombatFeatType.CRITICAL_STRIKE:           // 8
+      case CombatFeatType.SNIPER_SHOT:               // 31
+        return 2;
+      case CombatFeatType.IMPROVED_CRITICAL_STRIKE:  // 19
+      case CombatFeatType.IMPROVED_SNIPER_SHOT:      // 20
+        return 3;
+      case CombatFeatType.MASTER_CRITICAL_STRIKE:    // 81
+      case CombatFeatType.MASTER_SNIPER_SHOT:        // 77
+        return 4;
+    }
+    return 1;
+  }
+
+  /**
    * Check if the attack roll is a critical hit
    * @param attackRoll - The attack roll to check
    * @param weapon - The weapon to check the critical hit for
+   * @param feat - The active attack form (Critical Strike / Sniper Shot widen the threat range)
    * @returns True if the attack roll is a critical hit, false otherwise
    */
-  isCritical(attackRoll: number, weapon: ModuleItem | undefined = undefined): boolean {
+  isCritical(attackRoll: number, weapon: ModuleItem | undefined = undefined, feat?: TalentFeat): boolean {
     if(!weapon) return attackRoll == 20;
-    return (attackRoll > weapon.getCriticalThreatRangeMin() && attackRoll <= 20);
+    // Base threat width = the weapon's criticalThreat (range = [21 - width, 20]); the
+    // active form widens it per the dump (FUN_006afa60: totalWidth = baseWidth × tier).
+    const baseWidth = weapon.baseItem.criticalThreat;
+    const totalWidth = baseWidth * this.getThreatWidthMultiplier(feat);
+    return (attackRoll > (20 - totalWidth) && attackRoll <= 20);
   }
 
   /**
@@ -595,7 +625,7 @@ export class CombatRound {
       const penalty = this.calculateTwoWeaponPenalty(creature, weaponSlot);
       attackRoll -= penalty;
     }
-    const isCritical = this.isCritical(attackRoll, weapon);
+    const isCritical = this.isCritical(attackRoll, weapon, combatAction.feat);
     const hasAssuredHit = creature.hasEffect(GameEffectType.EffectAssuredHit);
     const attack = this.attackList[this.currentAttack];
     if(hasAssuredHit || isCritical || attackRoll > combatAction.target.getAC()){
