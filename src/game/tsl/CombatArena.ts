@@ -106,7 +106,11 @@ export class CombatArena {
       // 5) Kit the player.
       CombatArena.kitPlayer();
 
-      // 6) Spawn hostile enemies in front of the player.
+      // 6) Move the player off the module's entry (often a cramped elevator/door transition)
+      //    into the most OPEN part of the area so there is room to actually fight.
+      CombatArena.repositionToOpenSpot();
+
+      // 7) Spawn hostile enemies around the player.
       await CombatArena.spawnEnemies(enemyResRefs);
 
       if (GameState.Mode === EngineMode.DIALOG) {
@@ -379,6 +383,47 @@ export class CombatArena {
   /** Facing angle (engine convention: forward = (-sin f, cos f)) so an object at `from` looks at `to`. */
   static facingToward(from: any, to: any): number {
     return Math.atan2(-(to.x - from.x), (to.y - from.y));
+  }
+
+  /**
+   * Find the most OPEN walkable point in the area: the walkable-face centroid that is
+   * furthest from any walkmesh perimeter edge (area.scorePointEdgeDistance). That is the
+   * middle of the biggest open room — an actual fighting space rather than the entry
+   * elevator/corridor the module drops the player in. Samples up to ~300 faces for speed.
+   * Uses the PC's position vector as a scratch THREE.Vector3 (no THREE import needed).
+   */
+  static findOpenSpot(pc: any): any {
+    const area: any = GameState.module?.area;
+    if (!pc || !area || !Array.isArray(area.walkFaces) || !area.walkFaces.length) return null;
+    if (typeof area.scorePointEdgeDistance !== 'function') return null;
+
+    const faces = area.walkFaces;
+    const stride = Math.max(1, Math.floor(faces.length / 300));
+    const probe = pc.position.clone();
+    let best: any = null;
+    let bestScore = -Infinity;
+    for (let i = 0; i < faces.length; i += stride) {
+      const t = faces[i] && faces[i].triangle;
+      if (!t || !t.a || !t.b || !t.c) continue;
+      probe.set((t.a.x + t.b.x + t.c.x) / 3, (t.a.y + t.b.y + t.c.y) / 3, (t.a.z + t.b.z + t.c.z) / 3);
+      let score = 0;
+      try { score = area.scorePointEdgeDistance(probe); } catch (e) { continue; }
+      if (score > bestScore) { bestScore = score; best = probe.clone(); }
+    }
+    if (best) console.log(`[K2-ARENA] open spot clearance ~${bestScore === Infinity ? 'inf' : bestScore.toFixed(1)}u`);
+    return best;
+  }
+
+  /** Teleport the player to the most open spot in the area (see findOpenSpot). */
+  static repositionToOpenSpot(): void {
+    const pc: any = GameState.getCurrentPlayer();
+    if (!pc) return;
+    const spot = CombatArena.findOpenSpot(pc);
+    if (!spot) { console.warn('[K2-ARENA] no open spot found; staying at module entry'); return; }
+    pc.position.copy(spot);
+    try { pc.getCurrentRoom?.(); } catch (e) { /* non-fatal */ }
+    try { pc.computeBoundingBox?.(); } catch (e) { /* non-fatal */ }
+    console.log(`[K2-ARENA] moved PC to open spot (${spot.x.toFixed(1)}, ${spot.y.toFixed(1)}, ${spot.z.toFixed(1)})`);
   }
 
   /** Spawn hostile enemy copies in a small arc in front of the player, snapped to the walkmesh. */
