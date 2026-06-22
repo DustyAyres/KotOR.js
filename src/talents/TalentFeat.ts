@@ -234,9 +234,10 @@ export class TalentFeat extends TalentObject {
       case CombatFeatType.IMPROVED_FLURRY:         // 91
       case CombatFeatType.IMPROVED_RAPID_SHOT:     // 92
         return 2;
-      case CombatFeatType.MASTER_FLURRY:           // 53 (was wrongly 51)
-      case CombatFeatType.MASTER_RAPID_SHOT:       // 26 (was wrongly 21)
+      case CombatFeatType.MASTER_RAPID_SHOT:       // 26: -1 (dump FUN_006acec0)
         return 1;
+      case CombatFeatType.MASTER_FLURRY:           // 53: 0 - mastery removes the Flurry
+        return 0;                                  //     to-hit penalty entirely (dump FUN_006acec0)
       case CombatFeatType.POWER_ATTACK:            // 28 (was wrongly 8 = CRITICAL_STRIKE)
       case CombatFeatType.IMPROVED_POWER_ATTACK:   // 17
       case CombatFeatType.MASTER_POWER_ATTACK:     // 83
