@@ -102,6 +102,13 @@ export class ModuleCreature extends ModuleObject {
   isHologram: boolean;
   experience: number;
   feats: TalentFeat[];
+  /**
+   * The persistent active combat-mode form (Power Attack / Flurry / Critical Strike,
+   * Power Blast / Rapid Shot / Sniper Shot). Once set, every auto-attack this creature
+   * makes uses this form each round (the retail combat-mode toggle), until it is changed
+   * or cleared. undefined = plain attacks. See getValidCombatMode / setCombatMode.
+   */
+  combatActiveMode: TalentFeat | undefined;
   firstName: string;
   forcePoints: number;
   gender: number = 0;
@@ -1367,9 +1374,15 @@ export class ModuleCreature extends ModuleObject {
     combatAction.animationTime = 1500;
     combatAction.isCutsceneAttack = isCutsceneAttack;
 
-    if(feat){
+    // Fall back to the persistent combat-mode form when this attack carries no explicit
+    // feat: this is what makes an enabled Power Attack / Flurry / Critical Strike (etc.)
+    // apply to EVERY swing each round (incl. the auto-attack continuation), not just the
+    // one-shot the player clicked. Cutscene/scripted hits keep their literal damage.
+    const activeFeat = feat ? feat : (isCutsceneAttack ? undefined : this.getValidCombatMode());
+
+    if(activeFeat){
       combatAction.actionType = CombatActionType.ATTACK_USE_FEAT;
-      combatAction.setFeat(feat);
+      combatAction.setFeat(activeFeat);
     }
 
     combatAction.attackResult = attackResult;
@@ -1387,6 +1400,39 @@ export class ModuleCreature extends ModuleObject {
       this.actionQueue.add(action);
     }
 
+  }
+
+  /**
+   * Set (or clear, with undefined) the persistent active combat-mode form. Selecting a
+   * combat form from the action menu sets it here; selecting the basic Attack clears it.
+   * @param feat - The combat-mode form feat, or undefined to return to plain attacks
+   */
+  setCombatMode(feat?: TalentFeat){
+    this.combatActiveMode = feat;
+  }
+
+  /**
+   * @returns The persistent active combat-mode form (may be invalid for the current weapon)
+   */
+  getCombatMode(): TalentFeat | undefined {
+    return this.combatActiveMode;
+  }
+
+  /**
+   * The active combat-mode form ONLY if it is valid for the currently equipped weapon:
+   * melee forms (feat category 0x1104) require a melee weapon, ranged forms (0x1111) a
+   * ranged weapon - the same gate the action menu uses to offer them. This mirrors the
+   * engine re-validating a persistent mode after a weapon swap, so e.g. a Power Attack
+   * stance does not leak onto a blaster.
+   * @returns The valid active form, or undefined
+   */
+  getValidCombatMode(): TalentFeat | undefined {
+    const mode = this.combatActiveMode;
+    if(!mode){ return undefined; }
+    const weaponType = this.getEquippedWeaponType();
+    if(mode.category == 0x1104 && weaponType == 1){ return mode; } // melee form + melee weapon
+    if(mode.category == 0x1111 && weaponType == 4){ return mode; } // ranged form + ranged weapon
+    return undefined;
   }
 
   useTalent(talent: TalentObject, oTarget: ModuleObject): Action {

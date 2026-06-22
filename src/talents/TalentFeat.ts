@@ -140,28 +140,13 @@ export class TalentFeat extends TalentObject {
   useTalentOnObject(oTarget: ModuleObject, oCaster: ModuleObject){
     super.useTalentOnObject(oTarget, oCaster);
 
-    //MELEE
-    if(this.category == 0x1104){
+    //MELEE (0x1104) and RANGED (0x1111) combat forms are persistent stances: selecting
+    //one makes it the caster's active combat mode so it applies to every swing each round
+    //(retail combat-mode toggle), then we kick off the attack with it.
+    if(this.category == 0x1104 || this.category == 0x1111){
+      oCaster.setCombatMode(this);
       oCaster.attackCreature(oTarget, this);
       return;
-      // oCaster.actionQueue.add({
-      //   type: ActionType.ActionPhysicalAttacks,
-      //   object: oTarget,
-      //   feat: this.id
-      // });
-      // oCaster.combatData.lastCombatFeatUsed = this;
-    }
-
-    //RANGED
-    if(this.category == 0x1111){
-      oCaster.attackCreature(oTarget, this);
-      return;
-      // oCaster.actionQueue.add({
-      //   type: ActionType.ActionPhysicalAttacks,
-      //   object: oTarget,
-      //   feat: this.id
-      // });
-      // oCaster.combatData.lastCombatFeatUsed = this;
     }
 
   }
