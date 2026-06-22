@@ -191,6 +191,27 @@ export class CombatRound {
           break;
         }
       }
+
+      /**
+       * Effect-driven bonus attacks (dump FUN_005905f0 + FUN_005922c0): haste/speed
+       * and ModifyNumAttacks effects each grant extra on-hand attacks, but the
+       * COMBINED effect bonus is capped at 2. This is independent of, and additive
+       * with, the +1 Flurry/Rapid form attack above. (KotOR.js previously had no
+       * haste-driven extra attack here; the parity branch's min(bonus, 5) cap was
+       * also wrong — the binary caps the effect bonus at 2.)
+       */
+      let effectBonusAttacks = 0;
+      for(let i = 0; i < owner.effects.length; i++){
+        const effect = owner.effects[i];
+        if(effect.type == GameEffectType.EffectHaste){
+          effectBonusAttacks += 1;
+        }else if(effect.type == GameEffectType.EffectModifyNumAttacks){
+          effectBonusAttacks += effect.getInt(0);
+        }
+      }
+      if(effectBonusAttacks > 0){
+        this.additionalAttacks += Math.min(effectBonusAttacks, 2);
+      }
     }
   }
 
