@@ -15,7 +15,6 @@ import { ResourceTypes } from "@/resource/ResourceTypes";
 import { TalentSpell } from "@/talents";
 import { OdysseyModel3D } from "@/three/odyssey";
 import { ModuleObjectType } from "@/enums/module/ModuleObjectType";
-import { CombatFeatType } from "@/enums/combat/CombatFeatType";
 import { BitWise } from "@/utility/BitWise";
 import { Dice } from "@/utility/Dice";
 import { ItemProperty } from "@/engine/ItemProperty";
@@ -270,34 +269,17 @@ export class ModuleItem extends ModuleObject {
       }
     }
 
+    /**
+     * Weapon Focus = +1 to-hit (dump FUN_006a93a0 "Weapon Focus Bonus", gated on
+     * FUN_006b8e80): data-driven from the equipped weapon's baseitems.2da focfeat
+     * column — grant +1 if the wielder owns that feat. Per-category focus feats
+     * (32-37) auto-resolve from the data, replacing the old hardcoded
+     * WeaponWield/baseItemId(8/9/10) switch.
+     */
     if(BitWise.InstanceOfObject(this.possessor, ModuleObjectType.ModuleCreature)){
-      switch(this.getWeaponWield()){
-        case WeaponWield.BLASTER_PISTOL:
-          if(this.possessor.getHasFeat(CombatFeatType.WEAPON_FOCUS_BLASTER)){
-            bonus += 1;
-          }
-        break;
-        case WeaponWield.BLASTER_RIFLE:
-          if(this.possessor.getHasFeat(CombatFeatType.WEAPON_FOCUS_BLASTER_RIFLE)){
-            bonus += 1;
-          }
-        break;
-        case WeaponWield.BLASTER_HEAVY:
-          if(this.possessor.getHasFeat(CombatFeatType.WEAPON_FOCUS_HEAVY_WEAPONS)){
-            bonus += 1;
-          }
-        break;
-        case WeaponWield.ONE_HANDED_SWORD:
-        case WeaponWield.TWO_HANDED_SWORD:
-        case WeaponWield.STUN_BATON:
-          if(this.baseItemId == 8 || this.baseItemId == 9 || this.baseItemId == 10){
-            if(this.possessor.getHasFeat(CombatFeatType.WEAPON_FOCUS_LIGHTSABER)){
-              bonus += 1;
-            }
-          }else if(this.possessor.getHasFeat(CombatFeatType.WEAPON_FOCUS_MELEE_WEAPONS)){
-            bonus += 1;
-          }
-        break;
+      const focFeat = this.baseItem ? this.baseItem.focFeat : -1;
+      if(focFeat >= 0 && this.possessor.getHasFeat(focFeat)){
+        bonus += 1;
       }
     }
 
