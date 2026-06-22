@@ -492,16 +492,6 @@ export class CombatRound {
   }
 
   /**
-   * Calculate the attack roll for the given creature and weapon
-   * @param creature - The creature to calculate the attack roll for
-   * @param weapon - The weapon to calculate the attack roll for
-   * @returns The attack roll
-   */
-  calculateAttackRoll(creature: ModuleCreature, weapon: ModuleItem){
-    return Dice.roll(1, DiceType.d20, creature.getBaseAttackBonus() + (weapon?.getAttackBonus() || 0));
-  }
-
-  /**
    * The critical threat-range WIDTH multiplier from the active attack form (dump
    * FUN_006afa60). Critical Strike and Sniper Shot multiply the weapon's base threat
    * width by 2 / 3 / 4 across the basic / improved / master tiers; every other form
@@ -616,31 +606,44 @@ export class CombatRound {
    * @param combatAction - The combat action to calculate the attack for
    */
   calculateWeaponAttack(creature: ModuleCreature, weapon: ModuleItem | undefined = undefined, weaponSlot: ModuleCreatureArmorSlot, combatAction: CombatRoundAction) {
-    //Roll to hit
-    let attackRoll = this.calculateAttackRoll(creature, weapon);
+    // The NATURAL d20 governs the critical threat and the auto-miss/auto-hit rules
+    // (dump: 1d20 vs AC; natural 1 = automatic miss, natural 20 = automatic hit & threat;
+    // the crit threat range is checked against the natural roll, NOT the modified total).
+    const naturalRoll = Dice.roll(1, DiceType.d20);
+
+    // To-hit modifiers added to the natural roll for the hit-vs-AC comparison.
+    let toHit = creature.getBaseAttackBonus() + (weapon?.getAttackBonus() || 0);
     const isDualWielding = this.isDualWielding(creature);
     const isMainHand = weapon && weaponSlot == ModuleCreatureArmorSlot.RIGHTHAND;
     const isOffHand = weapon && weaponSlot == ModuleCreatureArmorSlot.LEFTHAND;
     if(isDualWielding && (isMainHand || isOffHand)){
-      const penalty = this.calculateTwoWeaponPenalty(creature, weaponSlot);
-      attackRoll -= penalty;
+      toHit -= this.calculateTwoWeaponPenalty(creature, weaponSlot);
     }
     // Active attack-form to-hit modifier (dump FUN_006acec0): Power Attack -3, Flurry
     // -4/-2/0, Rapid Shot, etc. Applied on the read path here - NOT via a per-round
     // effect - so the form's to-hit drawback actually reduces the roll (and so the
     // persistent combat-mode toggle doesn't leak penalty effects every round).
     if(combatAction.feat){
-      attackRoll -= combatAction.feat.getAttackPenalty();
+      toHit -= combatAction.feat.getAttackPenalty();
     }
-    const isCritical = this.isCritical(attackRoll, weapon, combatAction.feat);
+    const attackTotal = naturalRoll + toHit;
+
     const hasAssuredHit = creature.hasEffect(GameEffectType.EffectAssuredHit);
+    // A natural 1 never threatens; otherwise a threat is a natural roll inside the
+    // (form-widened) crit threat range. master has no separate confirmation roll, so a
+    // threat is a critical hit. AssuredHit forces a hit but is not itself a crit.
+    const isThreat = naturalRoll != 1 && this.isCritical(naturalRoll, weapon, combatAction.feat);
+    const isCritical = !hasAssuredHit && isThreat;
+    const autoMiss = naturalRoll == 1 && !hasAssuredHit;
+    const hit = !autoMiss && (hasAssuredHit || naturalRoll == 20 || isCritical || attackTotal > combatAction.target.getAC());
+
     const attack = this.attackList[this.currentAttack];
-    if(hasAssuredHit || isCritical || attackRoll > combatAction.target.getAC()){
-      combatAction.attackResult = (!hasAssuredHit && isCritical) ? AttackResult.CRITICAL_HIT : AttackResult.HIT_SUCCESSFUL;
+    if(hit){
+      combatAction.attackResult = isCritical ? AttackResult.CRITICAL_HIT : AttackResult.HIT_SUCCESSFUL;
       attack.reactObject = combatAction.target;
       attack.attackWeapon = weapon;
       attack.attackResult = combatAction.attackResult;
-      attack.calculateDamage(creature, !hasAssuredHit && isCritical, combatAction.feat);
+      attack.calculateDamage(creature, isCritical, combatAction.feat);
     }else{
       combatAction.attackResult = AttackResult.MISS;
       attack.reactObject = combatAction.target;
