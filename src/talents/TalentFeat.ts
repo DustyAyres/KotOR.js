@@ -234,7 +234,28 @@ export class TalentFeat extends TalentObject {
     }
     return 0;
   }
-  
+
+  /**
+   * The active attack-form to-hit BONUS (dump FUN_006acec0). A few forms ADD to-hit
+   * instead of subtracting: Force Jump (0 / +2 / +4 by tier) and Sniper Shot (+4 all
+   * tiers). Sniper's +4 is weapon-gated in the binary, but Sniper is a ranged form only
+   * usable with a ranged weapon, so the gate is satisfied whenever it is the active form.
+   * @returns The to-hit bonus this form grants (0 for forms with none or a penalty).
+   */
+  getAttackToHitBonus(){
+    switch(this.id){
+      case CombatFeatType.FORCE_JUMP_ADVANCED:  // 102
+        return 2;
+      case CombatFeatType.FORCE_JUMP_MASTERY:   // 103
+        return 4;
+      case CombatFeatType.SNIPER_SHOT:          // 31
+      case CombatFeatType.IMPROVED_SNIPER_SHOT: // 20
+      case CombatFeatType.MASTER_SNIPER_SHOT:   // 77
+        return 4;
+    }
+    return 0;
+  }
+
   impactCaster(object: ModuleObject){
     // The active attack-form to-hit / AC penalties (getAttackPenalty / getArmorClassPenalty)
     // are applied on the READ path now - the to-hit penalty in CombatRound.calculateWeaponAttack

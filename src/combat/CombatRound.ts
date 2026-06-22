@@ -619,12 +619,14 @@ export class CombatRound {
     if(isDualWielding && (isMainHand || isOffHand)){
       toHit -= this.calculateTwoWeaponPenalty(creature, weaponSlot);
     }
-    // Active attack-form to-hit modifier (dump FUN_006acec0): Power Attack -3, Flurry
-    // -4/-2/0, Rapid Shot, etc. Applied on the read path here - NOT via a per-round
-    // effect - so the form's to-hit drawback actually reduces the roll (and so the
-    // persistent combat-mode toggle doesn't leak penalty effects every round).
+    // Active attack-form to-hit modifier (dump FUN_006acec0): penalties (Power Attack -3,
+    // Flurry -4/-2/0, Rapid Shot, ...) and bonuses (Force Jump +2/+4, Sniper Shot +4).
+    // Applied on the read path here - NOT via a per-round effect - so the form's to-hit
+    // modifier actually changes the roll (and the persistent combat-mode toggle doesn't
+    // leak penalty effects every round).
     if(combatAction.feat){
       toHit -= combatAction.feat.getAttackPenalty();
+      toHit += combatAction.feat.getAttackToHitBonus();
     }
     const attackTotal = naturalRoll + toHit;
 
