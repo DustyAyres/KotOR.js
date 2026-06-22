@@ -271,10 +271,22 @@ export class CombatAttackData {
     const damageEffect = new EffectDamage();
     damageEffect.setCreator(owner);
 
+    let typeMask = 0;
     for(let i = 0; i < 15; i++){
       const damage = this.damageList[i];
       damageEffect.setInt(i, damage.damageValue);
+      // Build the damage-type flag mask from the real damage types (0..12) so the
+      // mitigation pipeline / getDamageType() can key off it (dump record type mask).
+      if(i <= 12 && damage.damageValue > 0){
+        typeMask |= (1 << i);
+      }
     }
+
+    // Stamp the damage type mask + penetration power (slots 17/18) the mitigation
+    // pipeline reads. Weapon penetration power is not modelled yet, so 0 (an
+    // unupgraded hit), which means flat Damage Reduction (DR n/+power) still applies.
+    damageEffect.setInt(17, typeMask);
+    damageEffect.setInt(18, 0);
 
     target.addEffect(damageEffect, GameEffectDurationType.INSTANT);
   }
