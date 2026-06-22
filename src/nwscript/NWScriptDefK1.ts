@@ -1138,10 +1138,13 @@ NWScriptDefK1.Actions = {
       effect.setCreator(this.caller);
       effect.setSpellId(this.getSpellId());
 
+      // nDamageType (args[1]) is a DAMAGE_TYPE_* flag (1<<type); place the amount in
+      // its per-type slot only. (Previously this ALSO wrote slot 14 as a duplicate
+      // "total", which now double-counts under EffectDamage.getDamageAmount summing
+      // the per-type slots 0..14 — so the duplicate is removed.)
       let damageTypeIndex = Math.log2(args[1]);
       effect.setInt( damageTypeIndex , args[0]);
 
-      effect.setInt(14, args[0]);
       effect.setInt(16, 1000);
       effect.setInt(17, args[1]);
       effect.setInt(18, args[2]);
