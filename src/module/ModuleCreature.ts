@@ -2670,7 +2670,12 @@ export class ModuleCreature extends ModuleObject {
 
     let dexBonus = Math.floor((this.getDEX() - 10) / 2);
 
-    return baseac + classBonus + armorAC + dexBonus;
+    // Active aggressive-form defense penalty: Flurry / Critical Strike (etc.) lower the
+    // attacker's AC while the stance is active. Applied on the read path via the
+    // persistent combat mode (replaces the leaky per-round EffectACDecrease).
+    let formACPenalty = this.getValidCombatMode()?.getArmorClassPenalty() || 0;
+
+    return baseac + classBonus + armorAC + dexBonus - formACPenalty;
   }
 
   getSTR(calculateBonuses = true){

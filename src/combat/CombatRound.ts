@@ -625,6 +625,13 @@ export class CombatRound {
       const penalty = this.calculateTwoWeaponPenalty(creature, weaponSlot);
       attackRoll -= penalty;
     }
+    // Active attack-form to-hit modifier (dump FUN_006acec0): Power Attack -3, Flurry
+    // -4/-2/0, Rapid Shot, etc. Applied on the read path here - NOT via a per-round
+    // effect - so the form's to-hit drawback actually reduces the roll (and so the
+    // persistent combat-mode toggle doesn't leak penalty effects every round).
+    if(combatAction.feat){
+      attackRoll -= combatAction.feat.getAttackPenalty();
+    }
     const isCritical = this.isCritical(attackRoll, weapon, combatAction.feat);
     const hasAssuredHit = creature.hasEffect(GameEffectType.EffectAssuredHit);
     const attack = this.attackList[this.currentAttack];

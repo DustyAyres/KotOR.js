@@ -236,25 +236,13 @@ export class TalentFeat extends TalentObject {
   }
   
   impactCaster(object: ModuleObject){
-    if(!BitWise.InstanceOfObject(object, ModuleObjectType.ModuleCreature)) return;
-
-    const armorClassPenalty = this.getArmorClassPenalty();
-    if(armorClassPenalty > 0){
-      const acDecreaseEffect = new EffectACDecrease();
-      acDecreaseEffect.setDurationType(GameEffectDurationType.TEMPORARY);
-      acDecreaseEffect.setDuration(FEAT_PENALTY_DURATION);
-      acDecreaseEffect.setInt(1, armorClassPenalty);
-      object.addEffect(acDecreaseEffect);
-    }
-
-    const attackPenalty = this.getAttackPenalty();
-    if(attackPenalty > 0){
-      const attackDecreaseEffect = new EffectAttackDecrease();
-      attackDecreaseEffect.setDurationType(GameEffectDurationType.TEMPORARY);
-      attackDecreaseEffect.setDuration(FEAT_PENALTY_DURATION);
-      attackDecreaseEffect.setInt(0, attackPenalty);
-      object.addEffect(attackDecreaseEffect);
-    }
+    // The active attack-form to-hit / AC penalties (getAttackPenalty / getArmorClassPenalty)
+    // are applied on the READ path now - the to-hit penalty in CombatRound.calculateWeaponAttack
+    // and the AC penalty in ModuleCreature.getAC, both keyed on the active combat mode. This
+    // method previously pushed TEMPORARY EffectACDecrease / EffectAttackDecrease effects with no
+    // expiry timestamp (setDuration only, never setExpireDay/Time), so they never expired and -
+    // once the persistent combat-mode toggle re-applied a form every round - accumulated without
+    // bound (and were never actually read by getAC / the attack roll). Kept as a no-op hook.
   }
 
   impactTarget(object: ModuleObject){
