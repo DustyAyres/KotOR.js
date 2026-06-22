@@ -256,6 +256,58 @@ export class TalentFeat extends TalentObject {
     return 0;
   }
 
+  /** Net to-hit modifier of this form (bonus - penalty), dump FUN_006acec0. */
+  getFormToHitModifier(){
+    return this.getAttackToHitBonus() - this.getAttackPenalty();
+  }
+
+  /** +1 on-hand attack while a Flurry / Rapid-Shot form is active (dump FUN_005905f0). */
+  getFormExtraAttacks(){
+    switch(this.id){
+      case CombatFeatType.FLURRY:               // 11
+      case CombatFeatType.IMPROVED_FLURRY:      // 91
+      case CombatFeatType.MASTER_FLURRY:        // 53
+      case CombatFeatType.RAPID_SHOT:           // 30
+      case CombatFeatType.IMPROVED_RAPID_SHOT:  // 92
+      case CombatFeatType.MASTER_RAPID_SHOT:    // 26
+        return 1;
+    }
+    return 0;
+  }
+
+  /** Flat damage bonus of a Power Attack / Power Blast form: +3 basic, +7 imp/master
+   * (dump FUN_006abf70). Mirrors CombatAttackData's resolution-path constants. */
+  getFormDamageBonus(){
+    switch(this.id){
+      case CombatFeatType.POWER_ATTACK:          // 28
+      case CombatFeatType.POWER_BLAST:           // 29
+        return 3;
+      case CombatFeatType.IMPROVED_POWER_ATTACK: // 17
+      case CombatFeatType.IMPROVED_POWER_BLAST:  // 18
+      case CombatFeatType.MASTER_POWER_ATTACK:   // 83
+      case CombatFeatType.MASTER_POWER_BLAST:    // 82
+        return 7;
+    }
+    return 0;
+  }
+
+  /** Critical threat-width multiplier of a Critical Strike / Sniper Shot form: 2/3/4 by
+   * tier, else 1 (dump FUN_006afa60). */
+  getFormThreatWidthMultiplier(){
+    switch(this.id){
+      case CombatFeatType.CRITICAL_STRIKE:           // 8
+      case CombatFeatType.SNIPER_SHOT:               // 31
+        return 2;
+      case CombatFeatType.IMPROVED_CRITICAL_STRIKE:  // 19
+      case CombatFeatType.IMPROVED_SNIPER_SHOT:      // 20
+        return 3;
+      case CombatFeatType.MASTER_CRITICAL_STRIKE:    // 81
+      case CombatFeatType.MASTER_SNIPER_SHOT:        // 77
+        return 4;
+    }
+    return 1;
+  }
+
   impactCaster(object: ModuleObject){
     // The active attack-form to-hit / AC penalties (getAttackPenalty / getArmorClassPenalty)
     // are applied on the READ path now - the to-hit penalty in CombatRound.calculateWeaponAttack

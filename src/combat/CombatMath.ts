@@ -221,3 +221,64 @@ function lowestSetBitIndex(mask: number): number {
   if (m === 0) return -1;
   return Math.log2(m & -m);
 }
+
+/**
+ * Baseline (no-form) inputs for estimating a combat form's expected per-round damage.
+ */
+export interface FormDamageBaseline {
+  /** Creature to-hit before any form modifier (BAB + weapon attack bonus). */
+  toHitBonus: number;
+  /** The target's armour class. */
+  targetAC: number;
+  /** Base on-hand attacks per round (normally 1). */
+  baseAttacks: number;
+  /** Average weapon damage per hit before the form's flat bonus (dice avg + STR + spec). */
+  avgDamagePerHit: number;
+  /** The weapon's critical hit multiplier. */
+  critMultiplier: number;
+  /** The weapon's base critical threat width (the `criticalThreat` value). */
+  baseThreatWidth: number;
+}
+
+/**
+ * Probability a single d20 attack hits, honouring the natural-1-always-misses /
+ * natural-20-always-hits rules. `bonus` is the total to-hit added to the natural roll.
+ */
+function probabilityToHit(bonus: number, targetAC: number): number {
+  // A natural roll r hits when r + bonus > AC, i.e. r > AC - bonus. Count the hitting
+  // natural rolls in (AC - bonus, 20], clamped so nat-20 always hits (>=1) and nat-1
+  // always misses (<=19).
+  let hits = 20 - Math.floor(targetAC - bonus);
+  if (hits < 1) hits = 1;
+  if (hits > 19) hits = 19;
+  return hits / 20;
+}
+
+/**
+ * Estimate a combat form's expected per-round damage vs a target (the dump's
+ * ExpectedDamageFormPolicy, grounded in the AI value scorers FUN_00580330/900/c50).
+ * `expected damage = attacks x P(hit) x avgDamage x (1 + critRate x (critMult - 1))`.
+ * Pass all-zero form modifiers to score a plain attack (no form). This is an
+ * [Unverified] EV approximation used only to RANK forms - it never affects how an
+ * attack actually resolves, so an imperfect estimate just yields a weaker AI choice.
+ */
+export function expectedFormDamage(
+  base: FormDamageBaseline,
+  formToHit: number,
+  formExtraAttacks: number,
+  formDamageBonus: number,
+  formThreatMult: number,
+): number {
+  const bonus = base.toHitBonus + formToHit;
+  const pHit = probabilityToHit(bonus, base.targetAC);
+  const attacks = Math.max(0, base.baseAttacks + formExtraAttacks);
+  const dmgPerHit = Math.max(0, base.avgDamagePerHit + formDamageBonus);
+
+  // Crit term: threat width (natural rolls that threaten) scaled by the form multiplier,
+  // confirmed at roughly the same hit chance, each adding (critMult - 1) x damage.
+  const threatWidth = Math.min(19, Math.max(0, base.baseThreatWidth) * Math.max(1, formThreatMult));
+  const pThreat = threatWidth / 20;
+  const critBump = 1 + pThreat * pHit * Math.max(0, base.critMultiplier - 1);
+
+  return attacks * pHit * dmgPerHit * critBump;
+}

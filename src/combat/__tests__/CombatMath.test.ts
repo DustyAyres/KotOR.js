@@ -4,9 +4,11 @@ import {
   absorbDamageByType,
   applyFlatDamageReduction,
   mitigateDamage,
+  expectedFormDamage,
   DamageResistanceShield,
   DamageImmunity,
   DamageReducer,
+  FormDamageBaseline,
 } from "@/combat/CombatMath";
 import { DamageType } from "@/enums/combat/DamageType";
 
@@ -170,6 +172,35 @@ describe("CombatMath - damage mitigation", () => {
       const immunities: DamageImmunity[] = [{ flags: 1 << DamageType.ENERGY, pct: 50 }];
       // mask 0 -> no fold: energy 8 -> 4, physical 3 untouched -> 7
       expect(mitigateDamage(perType, immunities, [], [], 0, 0)).toBe(7);
+    });
+  });
+
+  describe("expectedFormDamage (AI form policy)", () => {
+    const base = (targetAC: number): FormDamageBaseline => ({
+      toHitBonus: 5,
+      targetAC,
+      baseAttacks: 1,
+      avgDamagePerHit: 10,
+      critMultiplier: 2,
+      baseThreatWidth: 1,
+    });
+
+    test("Power Attack beats a plain attack vs a LOW-AC target", () => {
+      const plain = expectedFormDamage(base(10), 0, 0, 0, 1);
+      const powerAttack = expectedFormDamage(base(10), -3, 0, 3, 1); // -3 to-hit, +3 dmg
+      expect(powerAttack).toBeGreaterThan(plain);
+    });
+
+    test("Power Attack is dropped vs a HIGH-AC target (the -3 to-hit costs too much)", () => {
+      const plain = expectedFormDamage(base(17), 0, 0, 0, 1);
+      const powerAttack = expectedFormDamage(base(17), -3, 0, 3, 1);
+      expect(powerAttack).toBeLessThan(plain);
+    });
+
+    test("a +1-attack form with no to-hit penalty (Master Flurry) beats a plain attack", () => {
+      const plain = expectedFormDamage(base(15), 0, 0, 0, 1);
+      const masterFlurry = expectedFormDamage(base(15), 0, 1, 0, 1); // +1 attack, 0 to-hit
+      expect(masterFlurry).toBeGreaterThan(plain);
     });
   });
 });

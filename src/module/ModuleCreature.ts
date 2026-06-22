@@ -6,6 +6,7 @@ import type { ModuleRoom } from "@/module/ModuleRoom";
 
 import { AudioEmitter } from "@/audio/AudioEmitter";
 import { CreatureClass } from "@/combat/CreatureClass";
+import { expectedFormDamage, FormDamageBaseline } from "@/combat/CombatMath";
 import { EffectRacialType } from "@/effects";
 import { GameEffectType } from "@/enums/effects/GameEffectType";
 import { ModuleCreatureAnimState } from "@/enums/module/ModuleCreatureAnimState";
@@ -1374,11 +1375,20 @@ export class ModuleCreature extends ModuleObject {
     combatAction.animationTime = 1500;
     combatAction.isCutsceneAttack = isCutsceneAttack;
 
-    // Fall back to the persistent combat-mode form when this attack carries no explicit
-    // feat: this is what makes an enabled Power Attack / Flurry / Critical Strike (etc.)
-    // apply to EVERY swing each round (incl. the auto-attack continuation), not just the
-    // one-shot the player clicked. Cutscene/scripted hits keep their literal damage.
-    const activeFeat = feat ? feat : (isCutsceneAttack ? undefined : this.getValidCombatMode());
+    // Resolve the attack form when this attack carries no explicit feat: the controlled
+    // player uses their persistent combat-mode stance (the menu toggle), every other
+    // creature (AI party + enemies) picks one via the EV policy. This is what makes an
+    // enabled Power Attack / Flurry / Critical Strike (etc.) apply to EVERY swing each
+    // round - incl. the auto-attack continuation - not just the one-shot. Cutscene /
+    // scripted hits keep their literal damage.
+    let activeFeat: TalentFeat | undefined;
+    if(feat){
+      activeFeat = feat;
+    }else if(!isCutsceneAttack){
+      activeFeat = (GameState.getCurrentPlayer() == this)
+        ? this.getValidCombatMode()
+        : this.selectCombatModeForTarget(target);
+    }
 
     if(activeFeat){
       combatAction.actionType = CombatActionType.ATTACK_USE_FEAT;
@@ -1433,6 +1443,63 @@ export class ModuleCreature extends ModuleObject {
     if(mode.category == 0x1104 && weaponType == 1){ return mode; } // melee form + melee weapon
     if(mode.category == 0x1111 && weaponType == 4){ return mode; } // ranged form + ranged weapon
     return undefined;
+  }
+
+  /**
+   * AI combat-mode selection (the dump's CombatModeSelector + ExpectedDamageFormPolicy).
+   * Picks the owned, weapon-valid attack form whose estimated expected damage vs the
+   * target is highest, or undefined (plain attack) when no form beats it - so e.g. the
+   * AI takes Power Attack against a low-AC target but drops it (the -3 to-hit) against a
+   * high-AC one, and only flurries / critical-strikes when they pay off. Only affects
+   * which valid owned form an attack uses; the attack still resolves the same way.
+   * @param target - The creature being attacked
+   * @returns The chosen form, or undefined for a plain attack
+   */
+  selectCombatModeForTarget(target: ModuleObject): TalentFeat | undefined {
+    if(!BitWise.InstanceOfObject(target, ModuleObjectType.ModuleCreature)){ return undefined; }
+    if(this.isSimpleCreature()){ return undefined; }
+    const weapon = this.equipment.RIGHTHAND;
+    if(!weapon || !weapon.baseItem){ return undefined; }
+
+    const weaponType = this.getEquippedWeaponType();
+    const forms = this.getFeats().filter((f) =>
+      (f.category == 0x1104 && weaponType == 1) ||
+      (f.category == 0x1111 && weaponType == 4)
+    );
+    if(!forms.length){ return undefined; }
+
+    const baseItem = weapon.baseItem;
+    // baseItem.die is a string DiceType ('d8'); take its numeric size for the avg roll.
+    const dieSize = parseInt(String(baseItem.die).replace(/^d/, ''), 10) || 0;
+    const avgDice = (baseItem.numDice && dieSize) ? (baseItem.numDice * (dieSize + 1)) / 2 : 0;
+    const strMod = Math.floor((this.getSTR() - 10) / 2);
+    const base: FormDamageBaseline = {
+      toHitBonus: this.getBaseAttackBonus() + (weapon.getAttackBonus() || 0),
+      targetAC: (target as ModuleCreature).getAC(),
+      baseAttacks: 1,
+      avgDamagePerHit: avgDice + Math.max(strMod, 0),
+      critMultiplier: baseItem.criticalHitMultiplier || 2,
+      baseThreatWidth: baseItem.criticalThreat || 1,
+    };
+
+    // Plain attack (no form) is the baseline to beat.
+    let bestForm: TalentFeat | undefined = undefined;
+    let bestEV = expectedFormDamage(base, 0, 0, 0, 1);
+
+    for(const form of forms){
+      const ev = expectedFormDamage(
+        base,
+        form.getFormToHitModifier(),
+        form.getFormExtraAttacks(),
+        form.getFormDamageBonus(),
+        form.getFormThreatWidthMultiplier(),
+      );
+      if(ev > bestEV){
+        bestEV = ev;
+        bestForm = form;
+      }
+    }
+    return bestForm;
   }
 
   useTalent(talent: TalentObject, oTarget: ModuleObject): Action {

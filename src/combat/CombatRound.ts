@@ -500,19 +500,7 @@ export class CombatRound {
    * @returns The threat-width multiplier (1, 2, 3 or 4)
    */
   getThreatWidthMultiplier(feat?: TalentFeat): number {
-    if(!feat) return 1;
-    switch(feat.id){
-      case CombatFeatType.CRITICAL_STRIKE:           // 8
-      case CombatFeatType.SNIPER_SHOT:               // 31
-        return 2;
-      case CombatFeatType.IMPROVED_CRITICAL_STRIKE:  // 19
-      case CombatFeatType.IMPROVED_SNIPER_SHOT:      // 20
-        return 3;
-      case CombatFeatType.MASTER_CRITICAL_STRIKE:    // 81
-      case CombatFeatType.MASTER_SNIPER_SHOT:        // 77
-        return 4;
-    }
-    return 1;
+    return feat ? feat.getFormThreatWidthMultiplier() : 1;
   }
 
   /**
