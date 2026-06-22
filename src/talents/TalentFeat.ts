@@ -2,6 +2,7 @@ import { CombatRound } from "@/combat/CombatRound";
 import { type CreatureClass } from "@/combat/CreatureClass";
 import { EffectACDecrease, EffectAttackDecrease } from "@/effects";
 import { ModuleObjectType, TalentObjectType } from "@/enums";
+import { CombatFeatType } from "@/enums/combat/CombatFeatType";
 import { GameEffectDurationType } from "@/enums/effects";
 import { GFFDataType } from "@/enums/resource/GFFDataType";
 import { TwoDAManager } from "@/managers/TwoDAManager";
@@ -200,46 +201,49 @@ export class TalentFeat extends TalentObject {
   }
 
   getArmorClassPenalty(){
+    // this.id is the running game's feat.2da row; reference the (K2-correct) CombatFeatType enum so the right feat
+    // triggers. The raw numbers here were K1 ids and mis-mapped under K2 (28=POWER_ATTACK not CRITICAL_STRIKE,
+    // 51=WEAPON_SPEC_MELEE not MASTER_FLURRY, 21=IMPROVED_CONDITIONING not MASTER_RAPID_SHOT). Critical Strike's
+    // defense penalty (the dump traced to-hit/damage/threat, not AC) is preserved.
     switch(this.id){
-      case 11: //FLURRY
-      case 30: //RAPID SHOT
+      case CombatFeatType.FLURRY:                   // 11
+      case CombatFeatType.RAPID_SHOT:               // 30
         return 4;
-      case 91: //IMPROVED FLURRY
-      case 92: //IMPROVED RAPID SHOT
+      case CombatFeatType.IMPROVED_FLURRY:          // 91
+      case CombatFeatType.IMPROVED_RAPID_SHOT:      // 92
         return 2;
-      case 51: //MASTER FLURRY
-      case 21: //MASTER RAPID SHOT
+      case CombatFeatType.MASTER_FLURRY:            // 53 (was wrongly 51 = WEAPON_SPEC_MELEE_WEAPONS)
+      case CombatFeatType.MASTER_RAPID_SHOT:        // 26 (was wrongly 21 = IMPROVED_CONDITIONING)
         return 1;
-      case 28: //CRITICAL STRIKE
-      case 19: //IMPROVED CRITICAL STRIKE
-      case 81: //MASTER CRITICAL STRIKE
+      case CombatFeatType.CRITICAL_STRIKE:          // 8  (was wrongly 28 = POWER_ATTACK)
+      case CombatFeatType.IMPROVED_CRITICAL_STRIKE: // 19
+      case CombatFeatType.MASTER_CRITICAL_STRIKE:   // 81
         return 5;
     }
     return 0;
   }
 
   getAttackPenalty(){
+    // K2-correct feat ids via CombatFeatType (the raw numbers were K1 ids; under K2, 8=CRITICAL_STRIKE not
+    // POWER_ATTACK, so basic Power Attack's -3 to-hit was applied to Critical Strike instead). Power Attack /
+    // Power Blast = -3 to-hit (dump FUN_006acec0); Flurry/Rapid by tier (-4/-2/-1).
     switch(this.id){
-      case 11: //FLURRY
-      case 30: //RAPID SHOT
+      case CombatFeatType.FLURRY:                  // 11
+      case CombatFeatType.RAPID_SHOT:              // 30
         return 4;
-      case 91: //IMPROVED FLURRY
-      case 92: //IMPROVED RAPID SHOT
+      case CombatFeatType.IMPROVED_FLURRY:         // 91
+      case CombatFeatType.IMPROVED_RAPID_SHOT:     // 92
         return 2;
-      case 51: //MASTER FLURRY
-      case 21: //MASTER RAPID SHOT
+      case CombatFeatType.MASTER_FLURRY:           // 53 (was wrongly 51)
+      case CombatFeatType.MASTER_RAPID_SHOT:       // 26 (was wrongly 21)
         return 1;
-      case 8: //POWER ATTACK
+      case CombatFeatType.POWER_ATTACK:            // 28 (was wrongly 8 = CRITICAL_STRIKE)
+      case CombatFeatType.IMPROVED_POWER_ATTACK:   // 17
+      case CombatFeatType.MASTER_POWER_ATTACK:     // 83
         return 3;
-      case 17: //IMPROVED POWER ATTACK
-        return 3;
-      case 83: //MASTER POWER ATTACK
-        return 3;
-      case 29: //POWER BLAST
-        return 3;
-      case 18: //IMPROVED POWER BLAST
-        return 3;
-      case 82: //MASTER POWER BLAST
+      case CombatFeatType.POWER_BLAST:             // 29
+      case CombatFeatType.IMPROVED_POWER_BLAST:    // 18
+      case CombatFeatType.MASTER_POWER_BLAST:      // 82
         return 3;
     }
     return 0;
