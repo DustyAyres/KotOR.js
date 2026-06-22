@@ -629,15 +629,27 @@ export class CombatRound {
       toHit += combatAction.feat.getAttackToHitBonus();
     }
     const attackTotal = naturalRoll + toHit;
+    const targetAC = combatAction.target.getAC();
 
     const hasAssuredHit = creature.hasEffect(GameEffectType.EffectAssuredHit);
-    // A natural 1 never threatens; otherwise a threat is a natural roll inside the
-    // (form-widened) crit threat range. master has no separate confirmation roll, so a
-    // threat is a critical hit. AssuredHit forces a hit but is not itself a crit.
-    const isThreat = naturalRoll != 1 && this.isCritical(naturalRoll, weapon, combatAction.feat);
-    const isCritical = !hasAssuredHit && isThreat;
+    // Hit first (dump 1d20 vs AC): natural 1 always misses, natural 20 / AssuredHit always
+    // hits, otherwise the modified total must beat AC.
     const autoMiss = naturalRoll == 1 && !hasAssuredHit;
-    const hit = !autoMiss && (hasAssuredHit || naturalRoll == 20 || isCritical || attackTotal > combatAction.target.getAC());
+    const autoHit = naturalRoll == 20 || hasAssuredHit;
+    const hit = !autoMiss && (autoHit || attackTotal > targetAC);
+
+    // Critical hit: a hit whose natural roll falls in the (form-widened) crit threat
+    // range AND is then CONFIRMED by a second 1d20 + to-hit also beating AC (dump). An
+    // unconfirmed threat is just a normal hit. AssuredHit is not itself a crit. (The +4
+    // confirm for combat-mode 0x108 is not modelled.)
+    let isCritical = false;
+    if(hit && !hasAssuredHit && naturalRoll != 1){
+      const isThreat = this.isCritical(naturalRoll, weapon, combatAction.feat);
+      if(isThreat){
+        const confirmTotal = Dice.roll(1, DiceType.d20) + toHit;
+        isCritical = confirmTotal > targetAC;
+      }
+    }
 
     const attack = this.attackList[this.currentAttack];
     if(hit){
