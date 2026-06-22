@@ -121,7 +121,7 @@ export class EffectDamage extends GameEffect {
       }
     }
 
-    const total = mitigateDamage(perType, immunities, shields, reducers, this.getDamagePower() | 0);
+    const total = mitigateDamage(perType, immunities, shields, reducers, this.getDamagePower() | 0, this.getDamageType() | 0);
 
     // Write back depleted pools so multi-hit absorption decrements over time.
     for(let i = 0; i < shieldEffects.length; i++){

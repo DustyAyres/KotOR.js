@@ -34,6 +34,10 @@ describe("CombatMath - damage mitigation", () => {
       expect(applyDamageImmunity(10, 150)).toBe(0);   // clamp 100
       expect(applyDamageImmunity(10, -150)).toBe(20); // clamp -100
     });
+    test("vulnerability truncates toward zero (C integer division, not floor)", () => {
+      // -50% of 15 = -7.5; C truncation -> -7, so 15 - (-7) = 22 (Math.floor would give 23)
+      expect(applyDamageImmunity(15, -50)).toBe(22);
+    });
     test("zero damage stays zero", () => {
       expect(applyDamageImmunity(0, 50)).toBe(0);
     });
@@ -69,6 +73,18 @@ describe("CombatMath - damage mitigation", () => {
       ];
       expect(absorbDamageByType(perType, shields)).toBe(0);
       expect(perType[DamageType.FIRE]).toBe(10);
+    });
+    test("only the single largest matching shield applies (no stacking)", () => {
+      const perType: number[] = [];
+      perType[DamageType.ENERGY] = 10;
+      const shields: DamageResistanceShield[] = [
+        { flags: 1 << DamageType.ENERGY, perHit: 3, pool: 0 },
+        { flags: 1 << DamageType.ENERGY, perHit: 5, pool: 0 },
+      ];
+      // Dump takes the largest (5), not 3+5=8
+      expect(absorbDamageByType(perType, shields)).toBe(5);
+      expect(perType[DamageType.ENERGY]).toBe(5);
+      expect(shields[0].pool).toBe(0); // the smaller shield is untouched
     });
   });
 
@@ -127,6 +143,33 @@ describe("CombatMath - damage mitigation", () => {
       perType[DamageType.SLASHING] = 2;
       const reducers: DamageReducer[] = [{ amount: 5, power: 1, pool: 0 }];
       expect(mitigateDamage(perType, [], [], reducers, 0)).toBe(0);
+    });
+    test("typeless physical bonuses fold into the hit's primary type for immunity", () => {
+      // 8 energy weapon dice + 3 STR (PHYSICAL); a 50% energy immunity should reduce
+      // the WHOLE swing (11) not just the dice: trunc(11*50/100)=5 -> 6.
+      const perType: number[] = [];
+      perType[DamageType.ENERGY] = 8;
+      perType[DamageType.PHYSICAL] = 3;
+      const immunities: DamageImmunity[] = [{ flags: 1 << DamageType.ENERGY, pct: 50 }];
+      const mask = 1 << DamageType.ENERGY;
+      expect(mitigateDamage(perType, immunities, [], [], 0, mask)).toBe(6);
+    });
+    test("100% immunity to the weapon type stops the STR/PA bonus too", () => {
+      const perType: number[] = [];
+      perType[DamageType.ENERGY] = 8;
+      perType[DamageType.BASE] = 4;     // e.g. Power Attack
+      perType[DamageType.PHYSICAL] = 3; // STR
+      const immunities: DamageImmunity[] = [{ flags: 1 << DamageType.ENERGY, pct: 100 }];
+      const mask = 1 << DamageType.ENERGY;
+      expect(mitigateDamage(perType, immunities, [], [], 0, mask)).toBe(0);
+    });
+    test("without a type mask, physical bonuses stay untyped (only reduction touches them)", () => {
+      const perType: number[] = [];
+      perType[DamageType.ENERGY] = 8;
+      perType[DamageType.PHYSICAL] = 3;
+      const immunities: DamageImmunity[] = [{ flags: 1 << DamageType.ENERGY, pct: 50 }];
+      // mask 0 -> no fold: energy 8 -> 4, physical 3 untouched -> 7
+      expect(mitigateDamage(perType, immunities, [], [], 0, 0)).toBe(7);
     });
   });
 });

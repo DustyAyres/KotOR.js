@@ -70,7 +70,10 @@ export function applyDamageImmunity(dmg: number, pct: number): number {
   let p = pct | 0;
   if (p > 100) p = 100;
   if (p < -100) p = -100;
-  let reduction = Math.floor((p * dmg) / 100);
+  // C integer division truncates toward zero (Math.trunc), NOT toward -inf. This
+  // matters for negative pct (vulnerability): Math.floor would make the negative
+  // reduction one larger in magnitude on inexact division, over-applying damage by 1.
+  let reduction = Math.trunc((p * dmg) / 100);
   if (p > 0 && reduction < 1) reduction = 1;
   const result = dmg - reduction;
   return result < 0 ? 0 : result;
@@ -91,21 +94,26 @@ export function absorbDamageByType(perTypeDamage: number[], shields: DamageResis
     let dmg = perTypeDamage[type] | 0;
     if (dmg <= 0) continue;
     const flag = 1 << type;
+    // The dump (FUN_00541fd0) applies only the SINGLE largest matching resistance
+    // effect per damage type, not the sum of all matching effects. Pick the covering
+    // shield with the largest perHit, then absorb from just that one (pool <= 0 ==
+    // unlimited; a finite pool caps and depletes).
+    let best: DamageResistanceShield | undefined;
     for (const shield of shields) {
       if (!((shield.flags | 0) & flag)) continue;
-      const perHit = shield.perHit | 0;
-      if (perHit <= 0) continue;
-      let absorb = Math.min(dmg, perHit);
-      const pool = shield.pool | 0;
-      if (pool > 0) {
-        absorb = Math.min(absorb, pool);
-        shield.pool = pool - absorb;
-      }
-      if (absorb <= 0) continue;
-      dmg -= absorb;
-      resisted += absorb;
-      if (dmg <= 0) break;
+      if ((shield.perHit | 0) <= 0) continue;
+      if (!best || (shield.perHit | 0) > (best.perHit | 0)) best = shield;
     }
+    if (!best) continue;
+    let absorb = Math.min(dmg, best.perHit | 0);
+    const pool = best.pool | 0;
+    if (pool > 0) {
+      absorb = Math.min(absorb, pool);
+      best.pool = pool - absorb;
+    }
+    if (absorb <= 0) continue;
+    dmg -= absorb;
+    resisted += absorb;
     perTypeDamage[type] = dmg;
   }
   return resisted;
@@ -155,6 +163,7 @@ export function mitigateDamage(
   shields: DamageResistanceShield[],
   reducers: DamageReducer[],
   attackPower: number,
+  damageTypeMask: number = 0,
 ): number {
   const dmg: number[] = [];
   for (let t = 0; t <= 14; t++) {
@@ -162,12 +171,26 @@ export function mitigateDamage(
     dmg[t] = v > 0 ? v : 0;
   }
 
-  // floor-1 PRE: a connecting hit always deals >= 1 before mitigation. The
-  // guaranteed point goes to the typeless BASE slot so it bypasses immunity /
-  // resistance (it can still be eaten by flat reduction, mirroring floor-0 POST).
+  // The dump assembles the WHOLE swing (dice + STR + Power Attack + Weapon Spec) into
+  // one typed total before the type-keyed mitigation stages. KotOR.js puts the typeless
+  // physical bonuses in BASE (13) / PHYSICAL (14); fold them into the hit's primary
+  // damage type (lowest set bit of the mask) so immunity / resistance act on the whole
+  // swing, not just the weapon dice. With no typed damage (mask 0) they stay untyped and
+  // only flat Reduction touches them.
+  const primaryType = damageTypeMask ? lowestSetBitIndex(damageTypeMask) : -1;
+  const foldTarget = (primaryType >= 0 && primaryType <= 12) ? primaryType : -1;
+  if (foldTarget >= 0) {
+    dmg[foldTarget] += dmg[DamageType.BASE] + dmg[DamageType.PHYSICAL];
+    dmg[DamageType.BASE] = 0;
+    dmg[DamageType.PHYSICAL] = 0;
+  }
+
+  // floor-1 PRE: a connecting hit always deals >= 1 before mitigation. The guaranteed
+  // point goes to the primary damage type (so immunity / resistance can act on it, per
+  // the dump) when the hit is typed, else to the typeless BASE slot.
   let pre = 0;
   for (let t = 0; t <= 14; t++) pre += dmg[t];
-  if (pre < 1) dmg[DamageType.BASE] = 1;
+  if (pre < 1) dmg[foldTarget >= 0 ? foldTarget : DamageType.BASE] = 1;
 
   // Stage 1 - Immunity %, per real damage type (0..12).
   for (let t = 0; t <= 12; t++) {
@@ -190,4 +213,11 @@ export function mitigateDamage(
 
   // floor-0 POST.
   return total < 0 ? 0 : total;
+}
+
+/** Index (0-based) of the lowest set bit of a positive mask, e.g. 0b10100 -> 2. */
+function lowestSetBitIndex(mask: number): number {
+  const m = mask | 0;
+  if (m === 0) return -1;
+  return Math.log2(m & -m);
 }
