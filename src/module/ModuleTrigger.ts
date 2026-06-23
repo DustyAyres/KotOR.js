@@ -198,10 +198,12 @@ export class ModuleTrigger extends ModuleObject {
         }).then( (model: OdysseyModel3D) => {
           this.trapModel = model;
           this.container.add(model);
+          //Animate the just-loaded trap model. A trigger has no `this.model` (it's geometry),
+          //so the old `this.model.playAnimation` threw a null deref during module load.
           if(this.trapDetected){
-            this.model.playAnimation('detect', false);
+            this.trapModel.playAnimation('detect', false);
           }else{
-            this.model.playAnimation('default', false);
+            this.trapModel.playAnimation('default', false);
           }
         });
       });
@@ -250,11 +252,9 @@ export class ModuleTrigger extends ModuleObject {
     if(this.trapDetected){ return; }
     this.trapDetected = true;
 
-    if(this.trapDetected){
-      this.model.playAnimation('detect', false);
-    }else{
-      this.model.playAnimation('default', false);
-    }
+    //Play the trap's 'detect' animation. The visible model is `this.trapModel` (a trigger has
+    //no `this.model`), and it may still be loading when the trap is sprung, so guard it.
+    this.trapModel?.playAnimation('detect', false);
   }
 
   //Some modules have exit triggers that are placed in the same location that the player spawns into
