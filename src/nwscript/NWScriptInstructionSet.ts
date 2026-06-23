@@ -138,13 +138,33 @@ export const CALL_CONST = function( this: NWScriptInstance, instruction: NWScrip
   }
 }
 
+//Tracks which unimplemented action names we've already warned about so the per-frame
+//combat-AI / force-power scripts don't spam the console.
+const __unimplementedActionWarned = new Set<string>();
+
+/**
+ * Default ("no-op") return value for an action whose JS handler is missing.
+ * Mirrors RSADD's per-type zero-initialisation so a non-VOID action always leaves exactly
+ * one typed value on the stack, matching the NWScript calling convention.
+ */
+const getDefaultActionReturnValue = function( type: NWScriptDataType ): any {
+  switch(type){
+    case NWScriptDataType.INTEGER: return 0;
+    case NWScriptDataType.FLOAT:   return 0.0;
+    case NWScriptDataType.STRING:  return '';
+    case NWScriptDataType.VECTOR:  return new THREE.Vector3(0, 0, 0);
+    //OBJECT (== OBJECT_INVALID) / EFFECT / EVENT / LOCATION / TALENT are nullable handles
+    default:                       return undefined;
+  }
+}
+
 /**
  * CALL_ACTION
- * 
+ *
  * Constant Type is declared by the next byte x03, x04, x05, x06
- * 
+ *
  * KotOR JS - A remake of the Odyssey Game Engine that powered KotOR I & II
- * 
+ *
  * @author KobaltBlu <https://github.com/KobaltBlu>
  * @license {@link https://www.gnu.org/licenses/gpl-3.0.txt|GPLv3}
  */
@@ -195,7 +215,23 @@ export const CALL_ACTION = function( this: NWScriptInstance, instruction: NWScri
       this.stack.push( actionValue, action_definition.type );
     }
   }else{
-    console.warn(`NWScript Action ${action_definition.name} not found`, action_definition);
+    // The action has no JS implementation. For TSL this happens with K2-only routines that
+    // have no K1 handler to inherit (the NWScriptDefK2 merge only backfills indices that also
+    // exist in K1) — e.g. IsFormActive#816, called from k_sp1_generic's saving-throw helper.
+    // The compiled bytecode still obeys the NWScript calling convention: a non-VOID action
+    // ALWAYS leaves exactly one return value on the stack. Skipping that push pops the args
+    // but leaves the reserved return slot empty, so the stack ends up one slot short for every
+    // such call. That silent imbalance corrupts later fixed-offset local reads (it is what
+    // zeroed out the force-power EffectDamage locals so damage never landed, and what derails
+    // the k_ai_* combat scripts). Push a typed default so the frame stays balanced and the
+    // script keeps running with a sane no-op return.
+    if(action_definition.type != NWScriptDataType.VOID){
+      this.stack.push( getDefaultActionReturnValue(action_definition.type), action_definition.type );
+    }
+    if(!__unimplementedActionWarned.has(action_definition.name)){
+      __unimplementedActionWarned.add(action_definition.name);
+      console.warn(`NWScript Action ${action_definition.name} (#${instruction.action}) is not implemented — pushing a default return to keep the stack balanced. Further occurrences suppressed.`);
+    }
   }
 
 }
