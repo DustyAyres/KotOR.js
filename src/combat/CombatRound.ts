@@ -19,6 +19,7 @@ import { TextSprite3D } from "@/engine/TextSprite3D";
 import { BitWise } from "@/utility/BitWise";
 import { CombatAttackData } from "@/combat/CombatAttackData";
 import type { CombatRoundAction } from "@/combat/CombatRoundAction";
+import type { TalentFeat } from "@/talents";
 import { GameState } from "@/GameState";
 import { FeedbackMessageEntry } from "@/engine/FeedbackMessageEntry";
 import { FeebackMessageColor } from "@/enums/engine/FeedbackMessageColor";
@@ -190,6 +191,27 @@ export class CombatRound {
             }
           break;
         }
+      }
+
+      /**
+       * Effect-driven bonus attacks (dump FUN_005905f0 + FUN_005922c0): haste/speed
+       * and ModifyNumAttacks effects each grant extra on-hand attacks, but the
+       * COMBINED effect bonus is capped at 2. This is independent of, and additive
+       * with, the +1 Flurry/Rapid form attack above. (KotOR.js previously had no
+       * haste-driven extra attack here; the parity branch's min(bonus, 5) cap was
+       * also wrong — the binary caps the effect bonus at 2.)
+       */
+      let effectBonusAttacks = 0;
+      for(let i = 0; i < owner.effects.length; i++){
+        const effect = owner.effects[i];
+        if(effect.type == GameEffectType.EffectHaste){
+          effectBonusAttacks += 1;
+        }else if(effect.type == GameEffectType.EffectModifyNumAttacks){
+          effectBonusAttacks += effect.getInt(0);
+        }
+      }
+      if(effectBonusAttacks > 0){
+        this.additionalAttacks += Math.min(effectBonusAttacks, 2);
       }
     }
   }
@@ -470,24 +492,31 @@ export class CombatRound {
   }
 
   /**
-   * Calculate the attack roll for the given creature and weapon
-   * @param creature - The creature to calculate the attack roll for
-   * @param weapon - The weapon to calculate the attack roll for
-   * @returns The attack roll
+   * The critical threat-range WIDTH multiplier from the active attack form (dump
+   * FUN_006afa60). Critical Strike and Sniper Shot multiply the weapon's base threat
+   * width by 2 / 3 / 4 across the basic / improved / master tiers; every other form
+   * (or none) leaves it ×1.
+   * @param feat - The active attack form for this round
+   * @returns The threat-width multiplier (1, 2, 3 or 4)
    */
-  calculateAttackRoll(creature: ModuleCreature, weapon: ModuleItem){
-    return Dice.roll(1, DiceType.d20, creature.getBaseAttackBonus() + (weapon?.getAttackBonus() || 0));
+  getThreatWidthMultiplier(feat?: TalentFeat): number {
+    return feat ? feat.getFormThreatWidthMultiplier() : 1;
   }
 
   /**
    * Check if the attack roll is a critical hit
    * @param attackRoll - The attack roll to check
    * @param weapon - The weapon to check the critical hit for
+   * @param feat - The active attack form (Critical Strike / Sniper Shot widen the threat range)
    * @returns True if the attack roll is a critical hit, false otherwise
    */
-  isCritical(attackRoll: number, weapon: ModuleItem | undefined = undefined): boolean {
+  isCritical(attackRoll: number, weapon: ModuleItem | undefined = undefined, feat?: TalentFeat): boolean {
     if(!weapon) return attackRoll == 20;
-    return (attackRoll > weapon.getCriticalThreatRangeMin() && attackRoll <= 20);
+    // Base threat width = the weapon's criticalThreat (range = [21 - width, 20]); the
+    // active form widens it per the dump (FUN_006afa60: totalWidth = baseWidth × tier).
+    const baseWidth = weapon.baseItem.criticalThreat;
+    const totalWidth = baseWidth * this.getThreatWidthMultiplier(feat);
+    return (attackRoll > (20 - totalWidth) && attackRoll <= 20);
   }
 
   /**
@@ -565,24 +594,58 @@ export class CombatRound {
    * @param combatAction - The combat action to calculate the attack for
    */
   calculateWeaponAttack(creature: ModuleCreature, weapon: ModuleItem | undefined = undefined, weaponSlot: ModuleCreatureArmorSlot, combatAction: CombatRoundAction) {
-    //Roll to hit
-    let attackRoll = this.calculateAttackRoll(creature, weapon);
+    // The NATURAL d20 governs the critical threat and the auto-miss/auto-hit rules
+    // (dump: 1d20 vs AC; natural 1 = automatic miss, natural 20 = automatic hit & threat;
+    // the crit threat range is checked against the natural roll, NOT the modified total).
+    const naturalRoll = Dice.roll(1, DiceType.d20);
+
+    // To-hit modifiers added to the natural roll for the hit-vs-AC comparison.
+    let toHit = creature.getBaseAttackBonus() + (weapon?.getAttackBonus() || 0);
     const isDualWielding = this.isDualWielding(creature);
     const isMainHand = weapon && weaponSlot == ModuleCreatureArmorSlot.RIGHTHAND;
     const isOffHand = weapon && weaponSlot == ModuleCreatureArmorSlot.LEFTHAND;
     if(isDualWielding && (isMainHand || isOffHand)){
-      const penalty = this.calculateTwoWeaponPenalty(creature, weaponSlot);
-      attackRoll -= penalty;
+      toHit -= this.calculateTwoWeaponPenalty(creature, weaponSlot);
     }
-    const isCritical = this.isCritical(attackRoll, weapon);
+    // Active attack-form to-hit modifier (dump FUN_006acec0): penalties (Power Attack -3,
+    // Flurry -4/-2/0, Rapid Shot, ...) and bonuses (Force Jump +2/+4, Sniper Shot +4).
+    // Applied on the read path here - NOT via a per-round effect - so the form's to-hit
+    // modifier actually changes the roll (and the persistent combat-mode toggle doesn't
+    // leak penalty effects every round).
+    if(combatAction.feat){
+      toHit -= combatAction.feat.getAttackPenalty();
+      toHit += combatAction.feat.getAttackToHitBonus();
+    }
+    const attackTotal = naturalRoll + toHit;
+    const targetAC = combatAction.target.getAC();
+
     const hasAssuredHit = creature.hasEffect(GameEffectType.EffectAssuredHit);
+    // Hit first (dump 1d20 vs AC): natural 1 always misses, natural 20 / AssuredHit always
+    // hits, otherwise the modified total must beat AC.
+    const autoMiss = naturalRoll == 1 && !hasAssuredHit;
+    const autoHit = naturalRoll == 20 || hasAssuredHit;
+    const hit = !autoMiss && (autoHit || attackTotal > targetAC);
+
+    // Critical hit: a hit whose natural roll falls in the (form-widened) crit threat
+    // range AND is then CONFIRMED by a second 1d20 + to-hit also beating AC (dump). An
+    // unconfirmed threat is just a normal hit. AssuredHit is not itself a crit. (The +4
+    // confirm for combat-mode 0x108 is not modelled.)
+    let isCritical = false;
+    if(hit && !hasAssuredHit && naturalRoll != 1){
+      const isThreat = this.isCritical(naturalRoll, weapon, combatAction.feat);
+      if(isThreat){
+        const confirmTotal = Dice.roll(1, DiceType.d20) + toHit;
+        isCritical = confirmTotal > targetAC;
+      }
+    }
+
     const attack = this.attackList[this.currentAttack];
-    if(hasAssuredHit || isCritical || attackRoll > combatAction.target.getAC()){
-      combatAction.attackResult = (!hasAssuredHit && isCritical) ? AttackResult.CRITICAL_HIT : AttackResult.HIT_SUCCESSFUL;
+    if(hit){
+      combatAction.attackResult = isCritical ? AttackResult.CRITICAL_HIT : AttackResult.HIT_SUCCESSFUL;
       attack.reactObject = combatAction.target;
       attack.attackWeapon = weapon;
       attack.attackResult = combatAction.attackResult;
-      attack.calculateDamage(creature, !hasAssuredHit && isCritical, combatAction.feat);
+      attack.calculateDamage(creature, isCritical, combatAction.feat);
     }else{
       combatAction.attackResult = AttackResult.MISS;
       attack.reactObject = combatAction.target;

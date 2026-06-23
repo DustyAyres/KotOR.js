@@ -15,6 +15,18 @@ export class EffectDamageImmunityIncrease extends GameEffect {
     super();
     this.type = GameEffectType.EffectDamageImmunityIncrease;
 
+    this.setNumIntegers(2);
+
+    //intList[0] : nDamageType    - damage-type flag mask (covers type T when flags & (1<<T))
+    //intList[1] : nPercentImmunity - percent damage immunity for the covered types
+  }
+
+  getDamageType(){
+    return this.getInt(0);
+  }
+
+  getPercentImmunity(){
+    return this.getInt(1);
   }
 
   onApply(){

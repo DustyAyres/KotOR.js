@@ -40,6 +40,7 @@ import { EffectInvisibility } from "@/effects/EffectInvisibility";
 import { EffectKnockdown } from "@/effects/EffectKnockdown";
 import { EffectLink } from "@/effects/EffectLink";
 import { EffectMissChance } from "@/effects/EffectMissChance";
+import { EffectModifyNumAttacks } from "@/effects/EffectModifyNumAttacks";
 import { EffectMovementSpeedDecrease } from "@/effects/EffectMovementSpeedDecrease";
 import { EffectMovementSpeedIncrease } from "@/effects/EffectMovementSpeedIncrease";
 import { EffectPoison } from "@/effects/EffectPoison";
@@ -112,7 +113,7 @@ export class GameEffectFactory {
   static EffectDamage: typeof EffectDamage = EffectDamage;
   static EffectHeal: typeof EffectHeal = EffectHeal;
   static EffectLink: typeof EffectLink = EffectLink;
-  // static EffectModifyNumAttacks: typeof EffectModifyNumAttacks = EffectModifyNumAttacks;
+  static EffectModifyNumAttacks: typeof EffectModifyNumAttacks = EffectModifyNumAttacks;
   // static EffectCurse: typeof EffectCurse = EffectCurse;
   // static EffectSilence: typeof EffectSilence = EffectSilence;
   static EffectInvisibility: typeof EffectInvisibility = EffectInvisibility;
@@ -208,6 +209,9 @@ export class GameEffectFactory {
     switch(eType){
       case GameEffectType.EffectHaste: //Haste
         effect = new EffectHaste();
+      break;
+      case GameEffectType.EffectModifyNumAttacks: //ModifyNumAttacks
+        effect = new EffectModifyNumAttacks();
       break;
       case GameEffectType.EffectDamageResistance: //DamageResistance
         effect = new EffectDamageResistance();

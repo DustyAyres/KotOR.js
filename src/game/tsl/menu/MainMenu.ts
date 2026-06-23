@@ -8,6 +8,7 @@ import { OdysseyModel } from "@/odyssey";
 import { OdysseyModel3D } from "@/three/odyssey";
 import { ApplicationProfile } from "@/utility/ApplicationProfile";
 import { MainMenu as K1_MainMenu } from "@/game/kotor/KOTOR";
+import { CombatArena } from "@/game/tsl/CombatArena";
 
 /**
  * MainMenu class.
@@ -50,7 +51,15 @@ export class MainMenu extends K1_MainMenu {
     return new Promise<void>((resolve, reject) => {
       this.LB_MODULES.hide();
       this.LBL_NEWCONTENT.hide();
-      this.BTN_WARP.hide();
+
+      // Repurpose the otherwise-unused warp button as a Combat Arena test entry point:
+      // drops into a random K2 module with a kitted Jedi PC and spawned hostile enemies.
+      this.BTN_WARP.show();
+      try { this.BTN_WARP.setText('Combat Arena'); } catch (e) { /* keep default label */ }
+      this.BTN_WARP.addEventListener('click', (e) => {
+        e.stopPropagation();
+        CombatArena.Launch();
+      });
 
       this.BTN_NEWGAME.addEventListener('click', (e) => {
         e.stopPropagation();

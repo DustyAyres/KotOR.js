@@ -8,7 +8,6 @@ import { GameEffectDurationType } from "@/enums/effects/GameEffectDurationType";
 import { AttackResult } from "@/enums/combat/AttackResult";
 import { TalentFeat } from "@/talents";
 import { CombatFeatType } from "@/enums/combat/CombatFeatType";
-import { WeaponWield } from "@/enums/combat/WeaponWield";
 import { Dice } from "@/utility/Dice";
 import { DiceType } from "@/enums/combat/DiceType";
 import { WeaponType } from "@/enums/combat/WeaponType";
@@ -189,28 +188,35 @@ export class CombatAttackData {
         this.damageList[this.attackWeapon.getDamageBonusType()].addDamage(this.attackWeapon.getDamageBonus() * damageMultiplier);
       }
 
-      if( 
-        creature.getHasFeat(CombatFeatType.POWER_ATTACK) || 
-        creature.getHasFeat(CombatFeatType.POWER_BLAST)
-      ){
-        this.damageList[DamageType.BASE].addDamage(5 * damageMultiplier);
+      /**
+       * Power Attack / Power Blast damage (dump FUN_006abf70, power-attack mode byte
+       * at stats+0x512): basic tier (mode 2) = +3, improved/master tier (mode 3) = +7,
+       * crit-multiplied. Gated on the ACTIVE attack form (the feat selected for this
+       * round) — NOT passive feat ownership — and the tiers do NOT stack. The previous
+       * code added +5/+8/+10 and STACKED them (a master owner got +23) on passive
+       * getHasFeat; this matches the binary. K2 feat ids via CombatFeatType.
+       */
+      if(feat){
+        switch(feat.id){
+          case CombatFeatType.POWER_ATTACK:
+          case CombatFeatType.POWER_BLAST:
+            this.damageList[DamageType.BASE].addDamage(3 * damageMultiplier);
+          break;
+          case CombatFeatType.IMPROVED_POWER_ATTACK:
+          case CombatFeatType.IMPROVED_POWER_BLAST:
+          case CombatFeatType.MASTER_POWER_ATTACK:
+          case CombatFeatType.MASTER_POWER_BLAST:
+            this.damageList[DamageType.BASE].addDamage(7 * damageMultiplier);
+          break;
+        }
       }
 
-      if( 
-        creature.getHasFeat(CombatFeatType.IMPROVED_POWER_ATTACK) || 
-        creature.getHasFeat(CombatFeatType.IMPROVED_POWER_BLAST)
-      ){
-        this.damageList[DamageType.BASE].addDamage(8 * damageMultiplier);
-      }
-
-      if( 
-        creature.getHasFeat(CombatFeatType.MASTER_POWER_ATTACK) || 
-        creature.getHasFeat(CombatFeatType.MASTER_POWER_BLAST) 
-      ){
-        this.damageList[DamageType.BASE].addDamage(10 * damageMultiplier);
-      }
-
-      let specBonus = this.calculateWeaponSpecBonus(creature, this.attackWeapon);
+      /**
+       * Weapon Specialization = +2 damage (dump FUN_006abf70 gated on FUN_006b8ee0):
+       * passive and data-driven from the equipped weapon's baseitems.2da specfeat
+       * column. Crit-multiplied.
+       */
+      const specBonus = this.calculateWeaponSpecBonus(creature, this.attackWeapon);
       if(specBonus > 0){
         this.damageList[DamageType.BASE].addDamage(specBonus * damageMultiplier);
       }
@@ -240,38 +246,19 @@ export class CombatAttackData {
    * @returns The weapon specialization bonus
    */
   calculateWeaponSpecBonus(creature: ModuleCreature, weapon: ModuleItem): number {
-    let bonus = 0;
-    if(!creature){ return; }
-    
-    switch(weapon.getWeaponWield()){
-      case WeaponWield.BLASTER_PISTOL:
-        if(creature.getHasFeat(CombatFeatType.WEAPON_SPEC_BLASTER)){
-          bonus += 2;
-        }
-      break;
-      case WeaponWield.BLASTER_RIFLE:
-        if(creature.getHasFeat(CombatFeatType.WEAPON_SPEC_BLASTER_RIFLE)){
-          bonus += 2;
-        }
-      break;
-      case WeaponWield.BLASTER_HEAVY:
-        if(creature.getHasFeat(CombatFeatType.WEAPON_SPEC_HEAVY_WEAPONS)){
-          bonus += 2;
-        }
-      break;
-      case WeaponWield.ONE_HANDED_SWORD:
-      case WeaponWield.TWO_HANDED_SWORD:
-      case WeaponWield.STUN_BATON:
-        if(weapon.baseItemId == 8 || weapon.baseItemId == 9 || weapon.baseItemId == 10){
-          if(creature.getHasFeat(CombatFeatType.WEAPON_SPEC_LIGHTSABER)){
-            bonus += 2;
-          }
-        }else if(creature.getHasFeat(CombatFeatType.WEAPON_SPEC_MELEE_WEAPONS)){
-          bonus += 2;
-        }
-      break;
+    if(!creature || !weapon){ return 0; }
+
+    /**
+     * Data-driven Weapon Specialization (dump FUN_006b8ee0): read the equipped
+     * weapon's baseitems.2da specfeat column and, if it names a feat the wielder
+     * owns, grant +2. Per-category spec feats (46-52) auto-resolve from the data,
+     * replacing the old hardcoded WeaponWield/baseItemId(8/9/10) switch.
+     */
+    const specFeat = weapon.baseItem ? weapon.baseItem.specFeat : -1;
+    if(specFeat >= 0 && creature.getHasFeat(specFeat)){
+      return 2;
     }
-    return bonus;
+    return 0;
   }
 
   /**
@@ -284,10 +271,22 @@ export class CombatAttackData {
     const damageEffect = new EffectDamage();
     damageEffect.setCreator(owner);
 
+    let typeMask = 0;
     for(let i = 0; i < 15; i++){
       const damage = this.damageList[i];
       damageEffect.setInt(i, damage.damageValue);
+      // Build the damage-type flag mask from the real damage types (0..12) so the
+      // mitigation pipeline / getDamageType() can key off it (dump record type mask).
+      if(i <= 12 && damage.damageValue > 0){
+        typeMask |= (1 << i);
+      }
     }
+
+    // Stamp the damage type mask + penetration power (slots 17/18) the mitigation
+    // pipeline reads. Weapon penetration power is not modelled yet, so 0 (an
+    // unupgraded hit), which means flat Damage Reduction (DR n/+power) still applies.
+    damageEffect.setInt(17, typeMask);
+    damageEffect.setInt(18, 0);
 
     target.addEffect(damageEffect, GameEffectDurationType.INSTANT);
   }

@@ -42,6 +42,7 @@ export * from "@/effects/EffectInvisibility";
 export * from "@/effects/EffectKnockdown";
 export * from "@/effects/EffectLink";
 export * from "@/effects/EffectMissChance";
+export * from "@/effects/EffectModifyNumAttacks";
 export * from "@/effects/EffectMovementSpeedDecrease";
 export * from "@/effects/EffectMovementSpeedIncrease";
 export * from "@/effects/EffectPoison";

@@ -331,6 +331,8 @@ export class ActionMenuManager {
     if(action){
       if(index==0){
         if(action.action && action.action.type == ActionType.ActionPhysicalAttacks){
+          // Basic Attack clears any active combat-mode stance, then attacks plainly.
+          ActionMenuManager.oPC.setCombatMode(undefined);
           ActionMenuManager.oPC.attackCreature(action.target, undefined);
         }else if(action.action){
           console.log('onTargetMenuAction', action);

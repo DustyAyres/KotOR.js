@@ -6,6 +6,7 @@ import type { ModuleRoom } from "@/module/ModuleRoom";
 
 import { AudioEmitter } from "@/audio/AudioEmitter";
 import { CreatureClass } from "@/combat/CreatureClass";
+import { expectedFormDamage, FormDamageBaseline } from "@/combat/CombatMath";
 import { EffectRacialType } from "@/effects";
 import { GameEffectType } from "@/enums/effects/GameEffectType";
 import { ModuleCreatureAnimState } from "@/enums/module/ModuleCreatureAnimState";
@@ -102,6 +103,13 @@ export class ModuleCreature extends ModuleObject {
   isHologram: boolean;
   experience: number;
   feats: TalentFeat[];
+  /**
+   * The persistent active combat-mode form (Power Attack / Flurry / Critical Strike,
+   * Power Blast / Rapid Shot / Sniper Shot). Once set, every auto-attack this creature
+   * makes uses this form each round (the retail combat-mode toggle), until it is changed
+   * or cleared. undefined = plain attacks. See getValidCombatMode / setCombatMode.
+   */
+  combatActiveMode: TalentFeat | undefined;
   firstName: string;
   forcePoints: number;
   gender: number = 0;
@@ -1367,9 +1375,24 @@ export class ModuleCreature extends ModuleObject {
     combatAction.animationTime = 1500;
     combatAction.isCutsceneAttack = isCutsceneAttack;
 
+    // Resolve the attack form when this attack carries no explicit feat: the controlled
+    // player uses their persistent combat-mode stance (the menu toggle), every other
+    // creature (AI party + enemies) picks one via the EV policy. This is what makes an
+    // enabled Power Attack / Flurry / Critical Strike (etc.) apply to EVERY swing each
+    // round - incl. the auto-attack continuation - not just the one-shot. Cutscene /
+    // scripted hits keep their literal damage.
+    let activeFeat: TalentFeat | undefined;
     if(feat){
+      activeFeat = feat;
+    }else if(!isCutsceneAttack){
+      activeFeat = (GameState.getCurrentPlayer() == this)
+        ? this.getValidCombatMode()
+        : this.selectCombatModeForTarget(target);
+    }
+
+    if(activeFeat){
       combatAction.actionType = CombatActionType.ATTACK_USE_FEAT;
-      combatAction.setFeat(feat);
+      combatAction.setFeat(activeFeat);
     }
 
     combatAction.attackResult = attackResult;
@@ -1387,6 +1410,96 @@ export class ModuleCreature extends ModuleObject {
       this.actionQueue.add(action);
     }
 
+  }
+
+  /**
+   * Set (or clear, with undefined) the persistent active combat-mode form. Selecting a
+   * combat form from the action menu sets it here; selecting the basic Attack clears it.
+   * @param feat - The combat-mode form feat, or undefined to return to plain attacks
+   */
+  setCombatMode(feat?: TalentFeat){
+    this.combatActiveMode = feat;
+  }
+
+  /**
+   * @returns The persistent active combat-mode form (may be invalid for the current weapon)
+   */
+  getCombatMode(): TalentFeat | undefined {
+    return this.combatActiveMode;
+  }
+
+  /**
+   * The active combat-mode form ONLY if it is valid for the currently equipped weapon:
+   * melee forms (feat category 0x1104) require a melee weapon, ranged forms (0x1111) a
+   * ranged weapon - the same gate the action menu uses to offer them. This mirrors the
+   * engine re-validating a persistent mode after a weapon swap, so e.g. a Power Attack
+   * stance does not leak onto a blaster.
+   * @returns The valid active form, or undefined
+   */
+  getValidCombatMode(): TalentFeat | undefined {
+    const mode = this.combatActiveMode;
+    if(!mode){ return undefined; }
+    const weaponType = this.getEquippedWeaponType();
+    if(mode.category == 0x1104 && weaponType == 1){ return mode; } // melee form + melee weapon
+    if(mode.category == 0x1111 && weaponType == 4){ return mode; } // ranged form + ranged weapon
+    return undefined;
+  }
+
+  /**
+   * AI combat-mode selection (the dump's CombatModeSelector + ExpectedDamageFormPolicy).
+   * Picks the owned, weapon-valid attack form whose estimated expected damage vs the
+   * target is highest, or undefined (plain attack) when no form beats it - so e.g. the
+   * AI takes Power Attack against a low-AC target but drops it (the -3 to-hit) against a
+   * high-AC one, and only flurries / critical-strikes when they pay off. Only affects
+   * which valid owned form an attack uses; the attack still resolves the same way.
+   * @param target - The creature being attacked
+   * @returns The chosen form, or undefined for a plain attack
+   */
+  selectCombatModeForTarget(target: ModuleObject): TalentFeat | undefined {
+    if(!BitWise.InstanceOfObject(target, ModuleObjectType.ModuleCreature)){ return undefined; }
+    if(this.isSimpleCreature()){ return undefined; }
+    const weapon = this.equipment.RIGHTHAND;
+    if(!weapon || !weapon.baseItem){ return undefined; }
+
+    const weaponType = this.getEquippedWeaponType();
+    const forms = this.getFeats().filter((f) =>
+      (f.category == 0x1104 && weaponType == 1) ||
+      (f.category == 0x1111 && weaponType == 4)
+    );
+    if(!forms.length){ return undefined; }
+
+    const baseItem = weapon.baseItem;
+    // baseItem.die is a string DiceType ('d8'); take its numeric size for the avg roll.
+    const dieSize = parseInt(String(baseItem.die).replace(/^d/, ''), 10) || 0;
+    const avgDice = (baseItem.numDice && dieSize) ? (baseItem.numDice * (dieSize + 1)) / 2 : 0;
+    const strMod = Math.floor((this.getSTR() - 10) / 2);
+    const base: FormDamageBaseline = {
+      toHitBonus: this.getBaseAttackBonus() + (weapon.getAttackBonus() || 0),
+      targetAC: (target as ModuleCreature).getAC(),
+      baseAttacks: 1,
+      avgDamagePerHit: avgDice + Math.max(strMod, 0),
+      critMultiplier: baseItem.criticalHitMultiplier || 2,
+      baseThreatWidth: baseItem.criticalThreat || 1,
+    };
+
+    // Plain attack (no form) is the baseline to beat.
+    let bestForm: TalentFeat | undefined = undefined;
+    let bestEV = expectedFormDamage(base, 0, 0, 0, 1);
+
+    for(const form of forms){
+      const ev = expectedFormDamage(
+        base,
+        form.getFormToHitModifier(),
+        form.getFormExtraAttacks(),
+        form.getFormDamageBonus(),
+        form.getFormThreatWidthMultiplier(),
+      );
+      if(ev > bestEV){
+        bestEV = ev;
+        bestForm = form;
+      }
+    }
+    return bestForm;
   }
 
   useTalent(talent: TalentObject, oTarget: ModuleObject): Action {
@@ -2624,7 +2737,12 @@ export class ModuleCreature extends ModuleObject {
 
     let dexBonus = Math.floor((this.getDEX() - 10) / 2);
 
-    return baseac + classBonus + armorAC + dexBonus;
+    // Active aggressive-form defense penalty: Flurry / Critical Strike (etc.) lower the
+    // attacker's AC while the stance is active. Applied on the read path via the
+    // persistent combat mode (replaces the leaky per-round EffectACDecrease).
+    let formACPenalty = this.getValidCombatMode()?.getArmorClassPenalty() || 0;
+
+    return baseac + classBonus + armorAC + dexBonus - formACPenalty;
   }
 
   getSTR(calculateBonuses = true){

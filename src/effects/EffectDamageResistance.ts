@@ -15,10 +15,10 @@ export class EffectDamageResistance extends GameEffect {
     super();
     this.type = GameEffectType.EffectDamageResistance;
     
-    //intList[0] : nDamageType
-    //intList[1] : nDamageLimit
-    //intList[2] : nDamageLimit
-    //intList[3] : nVulnerabilityFlags ???
+    //intList[0] : nDamageType  - damage-type flag mask (covers type T when flags & (1<<T))
+    //intList[1] : nAmount       - points of damage removed per hit, per covered type
+    //intList[2] : nLimit        - remaining absorption pool (0 == infinite)
+    //intList[3] : nVulnerabilityFlags
 
   }
 

@@ -2,6 +2,7 @@ import { CombatRound } from "@/combat/CombatRound";
 import { type CreatureClass } from "@/combat/CreatureClass";
 import { EffectACDecrease, EffectAttackDecrease } from "@/effects";
 import { ModuleObjectType, TalentObjectType } from "@/enums";
+import { CombatFeatType } from "@/enums/combat/CombatFeatType";
 import { GameEffectDurationType } from "@/enums/effects";
 import { GFFDataType } from "@/enums/resource/GFFDataType";
 import { TwoDAManager } from "@/managers/TwoDAManager";
@@ -139,28 +140,13 @@ export class TalentFeat extends TalentObject {
   useTalentOnObject(oTarget: ModuleObject, oCaster: ModuleObject){
     super.useTalentOnObject(oTarget, oCaster);
 
-    //MELEE
-    if(this.category == 0x1104){
+    //MELEE (0x1104) and RANGED (0x1111) combat forms are persistent stances: selecting
+    //one makes it the caster's active combat mode so it applies to every swing each round
+    //(retail combat-mode toggle), then we kick off the attack with it.
+    if(this.category == 0x1104 || this.category == 0x1111){
+      oCaster.setCombatMode(this);
       oCaster.attackCreature(oTarget, this);
       return;
-      // oCaster.actionQueue.add({
-      //   type: ActionType.ActionPhysicalAttacks,
-      //   object: oTarget,
-      //   feat: this.id
-      // });
-      // oCaster.combatData.lastCombatFeatUsed = this;
-    }
-
-    //RANGED
-    if(this.category == 0x1111){
-      oCaster.attackCreature(oTarget, this);
-      return;
-      // oCaster.actionQueue.add({
-      //   type: ActionType.ActionPhysicalAttacks,
-      //   object: oTarget,
-      //   feat: this.id
-      // });
-      // oCaster.combatData.lastCombatFeatUsed = this;
     }
 
   }
@@ -200,71 +186,136 @@ export class TalentFeat extends TalentObject {
   }
 
   getArmorClassPenalty(){
+    // this.id is the running game's feat.2da row; reference the (K2-correct) CombatFeatType enum so the right feat
+    // triggers. The raw numbers here were K1 ids and mis-mapped under K2 (28=POWER_ATTACK not CRITICAL_STRIKE,
+    // 51=WEAPON_SPEC_MELEE not MASTER_FLURRY, 21=IMPROVED_CONDITIONING not MASTER_RAPID_SHOT). Critical Strike's
+    // defense penalty (the dump traced to-hit/damage/threat, not AC) is preserved.
     switch(this.id){
-      case 11: //FLURRY
-      case 30: //RAPID SHOT
+      case CombatFeatType.FLURRY:                   // 11
+      case CombatFeatType.RAPID_SHOT:               // 30
         return 4;
-      case 91: //IMPROVED FLURRY
-      case 92: //IMPROVED RAPID SHOT
+      case CombatFeatType.IMPROVED_FLURRY:          // 91
+      case CombatFeatType.IMPROVED_RAPID_SHOT:      // 92
         return 2;
-      case 51: //MASTER FLURRY
-      case 21: //MASTER RAPID SHOT
+      case CombatFeatType.MASTER_FLURRY:            // 53 (was wrongly 51 = WEAPON_SPEC_MELEE_WEAPONS)
+      case CombatFeatType.MASTER_RAPID_SHOT:        // 26 (was wrongly 21 = IMPROVED_CONDITIONING)
         return 1;
-      case 28: //CRITICAL STRIKE
-      case 19: //IMPROVED CRITICAL STRIKE
-      case 81: //MASTER CRITICAL STRIKE
+      case CombatFeatType.CRITICAL_STRIKE:          // 8  (was wrongly 28 = POWER_ATTACK)
+      case CombatFeatType.IMPROVED_CRITICAL_STRIKE: // 19
+      case CombatFeatType.MASTER_CRITICAL_STRIKE:   // 81
         return 5;
     }
     return 0;
   }
 
   getAttackPenalty(){
+    // K2-correct feat ids via CombatFeatType (the raw numbers were K1 ids; under K2, 8=CRITICAL_STRIKE not
+    // POWER_ATTACK, so basic Power Attack's -3 to-hit was applied to Critical Strike instead). Power Attack /
+    // Power Blast = -3 to-hit (dump FUN_006acec0); Flurry/Rapid by tier (-4/-2/-1).
     switch(this.id){
-      case 11: //FLURRY
-      case 30: //RAPID SHOT
+      case CombatFeatType.FLURRY:                  // 11
+      case CombatFeatType.RAPID_SHOT:              // 30
         return 4;
-      case 91: //IMPROVED FLURRY
-      case 92: //IMPROVED RAPID SHOT
+      case CombatFeatType.IMPROVED_FLURRY:         // 91
+      case CombatFeatType.IMPROVED_RAPID_SHOT:     // 92
         return 2;
-      case 51: //MASTER FLURRY
-      case 21: //MASTER RAPID SHOT
+      case CombatFeatType.MASTER_RAPID_SHOT:       // 26: -1 (dump FUN_006acec0)
         return 1;
-      case 8: //POWER ATTACK
+      case CombatFeatType.MASTER_FLURRY:           // 53: 0 - mastery removes the Flurry
+        return 0;                                  //     to-hit penalty entirely (dump FUN_006acec0)
+      case CombatFeatType.POWER_ATTACK:            // 28 (was wrongly 8 = CRITICAL_STRIKE)
+      case CombatFeatType.IMPROVED_POWER_ATTACK:   // 17
+      case CombatFeatType.MASTER_POWER_ATTACK:     // 83
         return 3;
-      case 17: //IMPROVED POWER ATTACK
-        return 3;
-      case 83: //MASTER POWER ATTACK
-        return 3;
-      case 29: //POWER BLAST
-        return 3;
-      case 18: //IMPROVED POWER BLAST
-        return 3;
-      case 82: //MASTER POWER BLAST
+      case CombatFeatType.POWER_BLAST:             // 29
+      case CombatFeatType.IMPROVED_POWER_BLAST:    // 18
+      case CombatFeatType.MASTER_POWER_BLAST:      // 82
         return 3;
     }
     return 0;
   }
-  
+
+  /**
+   * The active attack-form to-hit BONUS (dump FUN_006acec0). A few forms ADD to-hit
+   * instead of subtracting: Force Jump (0 / +2 / +4 by tier) and Sniper Shot (+4 all
+   * tiers). Sniper's +4 is weapon-gated in the binary, but Sniper is a ranged form only
+   * usable with a ranged weapon, so the gate is satisfied whenever it is the active form.
+   * @returns The to-hit bonus this form grants (0 for forms with none or a penalty).
+   */
+  getAttackToHitBonus(){
+    switch(this.id){
+      case CombatFeatType.FORCE_JUMP_ADVANCED:  // 102
+        return 2;
+      case CombatFeatType.FORCE_JUMP_MASTERY:   // 103
+        return 4;
+      case CombatFeatType.SNIPER_SHOT:          // 31
+      case CombatFeatType.IMPROVED_SNIPER_SHOT: // 20
+      case CombatFeatType.MASTER_SNIPER_SHOT:   // 77
+        return 4;
+    }
+    return 0;
+  }
+
+  /** Net to-hit modifier of this form (bonus - penalty), dump FUN_006acec0. */
+  getFormToHitModifier(){
+    return this.getAttackToHitBonus() - this.getAttackPenalty();
+  }
+
+  /** +1 on-hand attack while a Flurry / Rapid-Shot form is active (dump FUN_005905f0). */
+  getFormExtraAttacks(){
+    switch(this.id){
+      case CombatFeatType.FLURRY:               // 11
+      case CombatFeatType.IMPROVED_FLURRY:      // 91
+      case CombatFeatType.MASTER_FLURRY:        // 53
+      case CombatFeatType.RAPID_SHOT:           // 30
+      case CombatFeatType.IMPROVED_RAPID_SHOT:  // 92
+      case CombatFeatType.MASTER_RAPID_SHOT:    // 26
+        return 1;
+    }
+    return 0;
+  }
+
+  /** Flat damage bonus of a Power Attack / Power Blast form: +3 basic, +7 imp/master
+   * (dump FUN_006abf70). Mirrors CombatAttackData's resolution-path constants. */
+  getFormDamageBonus(){
+    switch(this.id){
+      case CombatFeatType.POWER_ATTACK:          // 28
+      case CombatFeatType.POWER_BLAST:           // 29
+        return 3;
+      case CombatFeatType.IMPROVED_POWER_ATTACK: // 17
+      case CombatFeatType.IMPROVED_POWER_BLAST:  // 18
+      case CombatFeatType.MASTER_POWER_ATTACK:   // 83
+      case CombatFeatType.MASTER_POWER_BLAST:    // 82
+        return 7;
+    }
+    return 0;
+  }
+
+  /** Critical threat-width multiplier of a Critical Strike / Sniper Shot form: 2/3/4 by
+   * tier, else 1 (dump FUN_006afa60). */
+  getFormThreatWidthMultiplier(){
+    switch(this.id){
+      case CombatFeatType.CRITICAL_STRIKE:           // 8
+      case CombatFeatType.SNIPER_SHOT:               // 31
+        return 2;
+      case CombatFeatType.IMPROVED_CRITICAL_STRIKE:  // 19
+      case CombatFeatType.IMPROVED_SNIPER_SHOT:      // 20
+        return 3;
+      case CombatFeatType.MASTER_CRITICAL_STRIKE:    // 81
+      case CombatFeatType.MASTER_SNIPER_SHOT:        // 77
+        return 4;
+    }
+    return 1;
+  }
+
   impactCaster(object: ModuleObject){
-    if(!BitWise.InstanceOfObject(object, ModuleObjectType.ModuleCreature)) return;
-
-    const armorClassPenalty = this.getArmorClassPenalty();
-    if(armorClassPenalty > 0){
-      const acDecreaseEffect = new EffectACDecrease();
-      acDecreaseEffect.setDurationType(GameEffectDurationType.TEMPORARY);
-      acDecreaseEffect.setDuration(FEAT_PENALTY_DURATION);
-      acDecreaseEffect.setInt(1, armorClassPenalty);
-      object.addEffect(acDecreaseEffect);
-    }
-
-    const attackPenalty = this.getAttackPenalty();
-    if(attackPenalty > 0){
-      const attackDecreaseEffect = new EffectAttackDecrease();
-      attackDecreaseEffect.setDurationType(GameEffectDurationType.TEMPORARY);
-      attackDecreaseEffect.setDuration(FEAT_PENALTY_DURATION);
-      attackDecreaseEffect.setInt(0, attackPenalty);
-      object.addEffect(attackDecreaseEffect);
-    }
+    // The active attack-form to-hit / AC penalties (getAttackPenalty / getArmorClassPenalty)
+    // are applied on the READ path now - the to-hit penalty in CombatRound.calculateWeaponAttack
+    // and the AC penalty in ModuleCreature.getAC, both keyed on the active combat mode. This
+    // method previously pushed TEMPORARY EffectACDecrease / EffectAttackDecrease effects with no
+    // expiry timestamp (setDuration only, never setExpireDay/Time), so they never expired and -
+    // once the persistent combat-mode toggle re-applied a form every round - accumulated without
+    // bound (and were never actually read by getAC / the attack roll). Kept as a no-op hook.
   }
 
   impactTarget(object: ModuleObject){

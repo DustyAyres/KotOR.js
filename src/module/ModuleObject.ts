@@ -3397,6 +3397,14 @@ export class ModuleObject {
     console.warn("Method not implemented.", this.tag, target);
   }
   /**
+   * Set the persistent active combat-mode form. No-op on the base object; overridden by
+   * ModuleCreature.
+   * @param feat - The combat-mode form feat, or undefined to clear it
+   */
+  setCombatMode(feat?: any) {
+    // implemented by ModuleCreature
+  }
+  /**
    * Set the commandable state
    * @param arg0 
    */

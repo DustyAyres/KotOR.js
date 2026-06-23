@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { NWScriptDataType } from "@/enums/nwscript/NWScriptDataType";
+import { NWScriptStackVariable } from "@/nwscript/NWScriptStackVariable";
 import { INWScriptDefAction } from "@/interface/nwscript/INWScriptDefAction";
 // import { ModuleObjectManager } from "@/managers/ModuleObjectManager";
 import type { NWScriptInstance } from "@/nwscript/NWScriptInstance";
@@ -80,12 +81,25 @@ export const CALL_RSADD = function( this: NWScriptInstance, instruction: NWScrip
  * @license {@link https://www.gnu.org/licenses/gpl-3.0.txt|GPLv3}
  */
 export const CALL_CPTOPSP = function( this: NWScriptInstance, instruction: NWScriptInstruction ){
+  const need = instruction.size / 4;
   const elements = this.stack.copyAtPointer( instruction.offset, instruction.size );
-  if(elements.length == (instruction.size / 4)){
+  if(elements.length == need){
     this.stack.stack.push( ...elements );
     this.stack.pointer += instruction.size;
   }else{
-    throw new Error(`CPTOPSP: copy size miss-match, expected: ${instruction.size} | received: ${elements.length*4}`);
+    // Degrade gracefully instead of throwing every frame. Some scripts (notably the K2
+    // combat AI run via signal events) request a CPTOPSP from a stack slot our VM hasn't
+    // populated; the throw aborted the script AND spammed the runtime-error overlay each
+    // frame. Pad with zero-int placeholders so the stack pointer stays consistent and the
+    // script limps on, and warn at most once.
+    for(let i = 0; i < need; i++){
+      this.stack.stack.push(elements[i] !== undefined ? elements[i] : new NWScriptStackVariable({ value: 0, type: NWScriptDataType.INTEGER }));
+    }
+    this.stack.pointer += instruction.size;
+    if(!(CALL_CPTOPSP as any).__warned){
+      (CALL_CPTOPSP as any).__warned = true;
+      console.warn(`CPTOPSP underflow (expected ${instruction.size}, got ${elements.length*4}) — degrading gracefully; further occurrences suppressed`);
+    }
   }
 }
 
