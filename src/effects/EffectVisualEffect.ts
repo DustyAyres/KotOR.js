@@ -127,6 +127,10 @@ export class EffectVisualEffect extends GameEffect {
       if(this.object.model && this.model){
         for(let node of this.object.model.nodes){
           let c_node = this.model.nodes.get(node[0]);
+          //The overlay effect model doesn't necessarily mirror every node of the object it's
+          //attached to (and the object's model can be swapped out, e.g. on death). Skip any
+          //node that has no counterpart instead of dereferencing undefined every frame.
+          if(!c_node) continue;
           c_node.position.copy(node[1].position);
           c_node.quaternion.copy(node[1].quaternion);
           c_node.scale.copy(node[1].scale);
