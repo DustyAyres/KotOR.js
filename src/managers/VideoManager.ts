@@ -332,7 +332,9 @@ export class VideoManager {
   static update(delta: number): void {
     if (!this.bikObject || !this.isPlaying) return;
     this.bikObject.update(delta);
-    const frame = this.bikObject.getCurrentFrame();
+    //update() can reach the end of the movie and dispose/null this.bikObject, so re-guard
+    //before reading the next frame (this fired once as the boot movie finished).
+    const frame = this.bikObject?.getCurrentFrame();
     if (frame) {
       VideoManager.updateVideoTextures(frame);
     }
