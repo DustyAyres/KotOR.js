@@ -184,9 +184,13 @@ export class TalentSpell extends TalentObject {
     
     oCaster.combatData.lastSpellTarget = oTarget;
     oTarget.combatData.lastSpellAttacker = oCaster;
-    if(this.hostilesetting == 1){
-      oCaster.resetExcitedDuration();
-    }
+    // Casting at a target puts the caster "in combat" the same way attacking does
+    // (cf. ActionPhysicalAttacks.update -> owner.resetExcitedDuration(), called
+    // unconditionally). Without this, combatData.combatState never flips true, updateCombat
+    // drops the caster from READY to PAUSE so the player "just stands there" and the queued
+    // cast stalls. Do it for any deliberate cast — not only hostilesetting == 1, which is
+    // -1/absent for many TSL powers.
+    oCaster.resetExcitedDuration();
 
     const combatAction = new CombatRoundAction(oCaster);
     combatAction.actionType = CombatActionType.CAST_SPELL;
