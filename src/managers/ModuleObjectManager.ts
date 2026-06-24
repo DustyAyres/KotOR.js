@@ -615,6 +615,16 @@ export class ModuleObjectManager {
 
     if((oType & NWModuleObjectType.CREATURE) == NWModuleObjectType.CREATURE){ //CREATURE
       object_pool = object_pool.concat(this.module.area.creatures);
+      //Party members (PC + companions) live in PartyManager.party, not area.creatures, so a
+      //shape search would otherwise never include them. That silently broke every party-wide
+      //buff (Force Valor, Knight/Master Valor, Inspire Followers, Revitalize, ...) which loops
+      //GetFirstObjectInShape and applies only to IsObjectPartyMember targets — the party was
+      //never in the pool. Damage powers are unaffected (they gate on GetIsEnemy). Dedupe in
+      //case a party member is also tracked in area.creatures.
+      for(let i = 0; i < PartyManager.party.length; i++){
+        const pm = PartyManager.party[i];
+        if(pm && object_pool.indexOf(pm) === -1) object_pool.push(pm);
+      }
     }
 
     if((oType & NWModuleObjectType.ITEM) == NWModuleObjectType.ITEM){ //ITEM
