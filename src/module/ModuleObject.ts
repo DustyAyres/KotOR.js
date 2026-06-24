@@ -2470,7 +2470,7 @@ export class ModuleObject {
     let roll = Dice.roll(1, DiceType.d20);
     let bonus = CombatRound.GetMod(this.getCON());
     
-    if((roll + this.getFortitudeSave() + bonus) > nDC){
+    if((roll + this.getFortitudeSave() + bonus) >= nDC){
       return 1
     }
 
@@ -2496,7 +2496,7 @@ export class ModuleObject {
     let roll = Dice.roll(1, DiceType.d20);
     let bonus = CombatRound.GetMod(this.getDEX());
     
-    if((roll + this.getReflexSave() + bonus) > nDC){
+    if((roll + this.getReflexSave() + bonus) >= nDC){
       return 1
     }
 
@@ -2530,7 +2530,7 @@ export class ModuleObject {
     let roll = Dice.roll(1, DiceType.d20);
     let bonus = CombatRound.GetMod(this.getWIS());
 
-    if((roll + this.getWillSave() + bonus) > nDC){
+    if((roll + this.getWillSave() + bonus) >= nDC){
       return 1
     }
 
