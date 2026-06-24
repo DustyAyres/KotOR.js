@@ -133,40 +133,55 @@ export class TalentSpell extends TalentObject {
     return this.catchtime;
   }
 
+  /**
+   * The CONJURE (wind-up) pose — a ONE-SHOT "castout" clip played for conjtime ms at the
+   * start of a cast. Driven by the spells.2da `conjanim` pose-mode column.
+   *
+   * RE (swkotor2.exe FUN_006c1490 @ 0x6c2c02): conjanim/castanim are symbolic POSE MODES
+   * (hand/self/up/throw/dark/...), NOT clip names. The real K2 animations.2da has only a
+   * small cast clip set: castout1/2/3 (one-shot, fireforget=1) + castoutlp1/2/3 (looping
+   * hold) + throwsab/throwsablp/throwgren/forcecrush. The wind-up uses the one-shot
+   * castout*; the channel uses the looping castoutlp* (see getCastingAnimation). Verified
+   * against the extracted K2 animations.2da (.planning/tmp/force-re).
+   */
   getConjureAnimation(){
-    if(this.conjanim == 'throw'){
-      if(this.id == 4 || this.id == 46){
-        return 'throwsab';
-      }else{
-        return 'throwgren';
-
-        //throwgen1 is an unnder-handed throw. I think it's used if the target is close
-        //this.conjanim = 'throwgen1';
-      }
+    switch(this.conjanim){
+      case 'throw':
+        // Lightsaber Throw (basic/advanced) -> saber throw, otherwise grenade. Preserved
+        // verbatim; the throw powers are a separate (deferred) concern.
+        return (this.id == 4 || this.id == 46) ? 'throwsab' : 'throwgren';
+      case 'up':
+        return 'castout3';   // both-arms-overhead wind-up (e.g. Death Field)
+      default:
+        return 'castout1';   // hand-forward wind-up ('hand' majority + fallbacks)
     }
-
-    if(this.conjanim == 'up'){
-      return 'castout3';
-    }
-    return 'castout1';
   }
 
+  /**
+   * The CAST (channel/release) pose — the LOOPING "castout loop" clip held for casttime ms
+   * while the power resolves. THIS IS THE FIX: it is driven by the spells.2da `castanim`
+   * column. The old code branched on `conjanim` here and NEVER read `castanim`, so e.g.
+   * Force Storm (conjanim=hand, castanim=up) channeled hand-forward instead of arms-overhead.
+   *
+   * Mode -> clip (RE: animations.2da has no dedicated per-mode clip, so the modes collapse
+   * onto the small loop set):
+   *   up            -> castoutlp3 (arms overhead: Force Storm, Death Field, Force Wave)
+   *   crush         -> forcecrush (dedicated Force Crush clip)
+   *   throw         -> throwsablp (lightsaber throw hold) / '' (grenade has no hold loop)
+   *   self/dark/fury/jump/''/default -> castoutlp1 (hand-forward channel; covers Shock,
+   *     Lightning and the buff/heal majority — no dedicated self/dark/fury clip exists)
+   */
   getCastingAnimation(){
-    if(this.conjanim == 'throw'){
-      if(this.id == 4 || this.id == 46){
-        return 'throwsablp';
-      }else{
-        return '';
-
-        //throwgen1 is an unnder-handed throw. I think it's used if the target is close
-        //this.conjanim = 'throwgen1';
-      }
+    switch(this.castanim){
+      case 'throw':
+        return (this.id == 4 || this.id == 46) ? 'throwsablp' : '';
+      case 'up':
+        return 'castoutlp3';
+      case 'crush':
+        return 'forcecrush';
+      default:
+        return 'castoutlp1';
     }
-
-    if(this.conjanim == 'up'){
-      return 'castoutlp3';
-    }
-    return 'castoutlp1';
   }
 
   getCasterAnimation(){

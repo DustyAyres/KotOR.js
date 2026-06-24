@@ -614,10 +614,13 @@ export class OdysseyModel3D extends OdysseyObject3D {
   setEmitterTarget(node: OdysseyModel3D){
     if(node instanceof OdysseyModel3D){
       for(let i = 0; i < this.emitters.length; i++){
-        if(this.emitters[i].referenceNode instanceof OdysseyModel3D){
-          // node.getWorldPosition(
-          //   this.emitters[i].referenceNode.position
-          // );
+        // Beam/Lightning/P2P emitters draw toward referenceNode (see OdysseyEmitter3D
+        // tickLightning/tickP2P*). Every emitter's referenceNode defaults to a base
+        // `new OdysseyObject3D()` (origin), and OdysseyModel3D EXTENDS OdysseyObject3D — so the
+        // old `instanceof OdysseyModel3D` guard NEVER matched the default node and the target
+        // was never set, leaving the beam pointed at world origin (invisible). Check the actual
+        // base type so the emitter endpoint is wired to the real target.
+        if(this.emitters[i].referenceNode instanceof OdysseyObject3D){
           this.emitters[i].referenceNode = node;
         }
       }

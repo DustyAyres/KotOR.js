@@ -6,6 +6,7 @@ import { ActionStatus } from "@/enums/actions/ActionStatus";
 import { ActionType } from "@/enums/actions/ActionType";
 import { ModuleCreatureAnimState } from "@/enums/module/ModuleCreatureAnimState";
 import { ModuleObjectConstant } from "@/enums/module/ModuleObjectConstant";
+import { OdysseyModelAnimation } from "@/odyssey";
 import { GameState } from "@/GameState";
 // import { TalentSpell } from "@/talents/TalentSpell";
 import { BitWise } from "@/utility/BitWise";
@@ -81,6 +82,31 @@ export class ActionCastSpell extends Action {
             combatRound.pauseRound(this.owner, combatRound.roundLength);
             if(combatRound.action){
               combatRound.action.animation = ModuleCreatureAnimState.CASTOUT1;
+            }
+
+            // Play the caster's CONJURE (wind-up) pose, mirroring how attacks animate
+            // (cf. CombatRound.calculateRoundAnimations -> creature.playTwoDAAnimation +
+            // animationState.index). getConjureAnimation() is the ONE-SHOT castout* wind-up
+            // (driven by conjanim). SpellCastInstance.update() then switches to the LOOPING
+            // castoutlp* channel pose (driven by castanim) when the cast phase begins, and
+            // hands the caster back to ready/idle on completion.
+            //
+            // animationState.index = CASTOUT1 is a SENTINEL, not a clip selector: the played
+            // clip is the .animation set by playTwoDAAnimation (updateAnimationState reads
+            // .animation, not .index — and animationConstantToAnimation has NO CASTOUT case).
+            // Crucially CASTOUT1 is NOT in the READY-promotion check (ModuleCreature ~637:
+            // index==PAUSE) nor the turning set (~732 stationaryTurnStates), so it shields the
+            // cast pose from being clobbered mid-cast.
+            if(BitWise.InstanceOfObject(this.owner, ModuleObjectType.ModuleCreature)){
+              const caster: any = this.owner;
+              const conjureName = this.spell.getConjureAnimation();
+              if(conjureName){
+                const conjureAnim = OdysseyModelAnimation.GetAnimation2DA(conjureName);
+                if(conjureAnim){
+                  caster.playTwoDAAnimation(conjureAnim);
+                  caster.animationState.index = ModuleCreatureAnimState.CASTOUT1;
+                }
+              }
             }
 
             if(combatRound.roundStarted){
