@@ -55,6 +55,18 @@ export class SpellCastInstance {
     this.owner = caster;
     this.target = target;
     this.spell = spell;
+
+    //Seed the per-cast fields off the spells.2da row. Without this the impactscript
+    //is undefined -> impact() runs Load(undefined) (a no-op) and the spell deals no
+    //damage; conjureTime stays hardcoded 3000 and castTime stays 0 (so impact() is
+    //never reached for S/M-range powers). spells.2da conjtime/casttime are in ms.
+    if(spell){
+      this.impactscript = spell.impactscript;
+      this.casthandvisual = spell.casthandvisual;
+      this.conjanim = spell.conjanim;
+      this.conjureTime = Math.max(Number(spell.getConjureTime()) || 0, 0);
+      this.castTime = Math.max(Number(spell.getCastTime()) || 0, 0);
+    }
   }
 
   init(){
@@ -138,9 +150,11 @@ export class SpellCastInstance {
     }else{
       this.conjuring = false;
 
-      if(this.spell.range == 'L'){
-        this.impact();
-      }
+      //Impact unconditionally at the end of the cast. The `impacted` guard inside
+      //impact() prevents a double-run for non-'L' powers that already impacted in the
+      //castTime branch; this covers powers with casttime==0 (which would otherwise
+      //never reach impact() unless range=='L').
+      this.impact();
 
       //I guess the spell is over now
       this.completed = true;
@@ -160,7 +174,7 @@ export class SpellCastInstance {
     if(this.impacted) return;
     this.impacted = true;
     
-    if(this.impactscript != ''){
+    if(this.impactscript){
       console.log('Casting spell', this.impactscript, this);
       const instance = GameState.NWScript.Load(this.impactscript);
       if(instance) {
@@ -171,7 +185,7 @@ export class SpellCastInstance {
       };
     }
 
-    if(this.casthandvisual != ''){
+    if(this.casthandvisual){
       MDLLoader.loader.load(this.casthandvisual)
       .then((mdl: OdysseyModel) => {
         OdysseyModel3D.FromMDL(mdl, {

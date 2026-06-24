@@ -2866,7 +2866,20 @@ export class ModuleCreature extends ModuleObject {
   }
 
   getSpellSaveDC(){
-    return 10 + this.getSpellCasterLevel();
+    // Force-power save DC. Dump-confirmed from the K2 GetSpellSaveDC #111 handler
+    // (swkotor2.exe FUN_00688750 -> FUN_0058a1c0): base 5 + force-using level +
+    // WIS modifier + CHA modifier (BOTH ability mods added, not higher-of) + a
+    // Force Focus feat bonus (highest tier only: Mastery +4 > Advanced +3 > basic +2),
+    // clamped >= 1. getSpellCasterLevel() (sum of force-using class levels) matches the
+    // engine's level term (FUN_006a4e00). (The FORCE_SCREAM-family +5 is omitted here:
+    // it needs the current spell id and is N/A to the standard powers.)
+    const wisMod = Math.floor((this.getWIS() - 10) / 2);
+    const chaMod = Math.floor((this.getCHA() - 10) / 2);
+    let forceFocus = 0;
+    if(this.getHasFeat(90)) forceFocus = 4;       // MASTER_FORCE_FOCUS (FORCE_FOCUS_MASTERY)
+    else if(this.getHasFeat(89)) forceFocus = 3;  // FORCE_FOCUS_ADVANCED
+    else if(this.getHasFeat(88)) forceFocus = 2;  // FORCE_FOCUS
+    return Math.max(5 + this.getSpellCasterLevel() + wisMod + chaMod + forceFocus, 1);
   }
 
   getSpellCasterLevel(){

@@ -2964,8 +2964,13 @@ export class ModuleObject {
       this.model.updateMatrix();
     }
     
-    if(this.model instanceof THREE.Object3D)
+    if(this.model instanceof THREE.Object3D){
+      //this.box is nulled out on dispose(); a spawn/respawn (or the arena's clone-then-destroy
+      //flow) can call computeBoundingBox again on such an object, so lazily re-create the box
+      //instead of dereferencing undefined (which aborted onSpawn and broke module loading).
+      if(!this.box) this.box = new THREE.Box3();
       this.box.setFromObject(this.model);
+    }
   }
 
   /**
