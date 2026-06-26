@@ -1110,7 +1110,12 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
     const target = OdysseyEmitter3D._v3B.set(0, 0, 0);
     this.referenceNode.getWorldPosition(target);
 
-    let scale = 0.5;
+    // Strand WIDTH. The LIGHTNING shader branch (ShaderOdysseyEmitter ~277) renders position in
+    // pure world space and ignores the scaleF attribute, so the only way to honor the emitter's
+    // authored size is to drive the half-width offset from it here. Use the emitter's authored
+    // start size (sizes[0]) so layered thin/thick strands read like real KotOR2 force lightning
+    // instead of one fixed 0.5-wide band; fall back to 0.5 when no size is authored.
+    let scale = (this.sizes && this.sizes[0]) ? this.sizes[0] : 0.5;
 
     let gridX1 = 2;
     let indices: number[] = [];
@@ -1151,7 +1156,14 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
             xO = -scale/2;
           }
 
-          vertices.push( x + xO, - y, z );
+          // NOTE: was `-y`. start/target come from getWorldPosition() (true Z-up world space)
+          // and the LIGHTNING shader branch renders `projectionMatrix * (viewMatrix * identity) *
+          // position` (ShaderOdysseyEmitter.ts ~276-277) — it treats `position` as world space
+          // with NO compensating rotation. Negating Y therefore mirrored the bolt to world
+          // Y ≈ -start.y (hundreds of units off-screen), which is why force-power lightning beams
+          // never rendered. Push the un-flipped world Y so the bolt is authored between the real
+          // caster→target world positions.
+          vertices.push( x + xO, y, z );
           normals.push( 0, 0, 1 );
           uvs.push( ix / 1 );
           uvs.push( 1 - ( iy / (lightningZigZag-1) ) );

@@ -784,10 +784,14 @@ export class ModuleCreature extends ModuleObject {
         this.equipment.CLAW3.update(delta);
       }
 
-      //Loop through and update the effects
+      //Loop through and update the effects.
+      // Use the LIVE length and null-guard each entry: an effect's update() (e.g. a duration-ended
+      // temporary effect from a multi-target Force Storm/Lightning AOE) can remove itself or another
+      // effect mid-loop. The old cached-length loop then dereferenced a now-undefined trailing slot
+      // -> "Cannot read properties of undefined (reading 'update')" crashed the whole game loop.
       if(this.deferEventUpdate){
-        for(let i = 0, len = this.effects.length; i < len; i++){
-          this.effects[i].update(delta);
+        for(let i = 0; i < this.effects.length; i++){
+          if(this.effects[i]) this.effects[i].update(delta);
         }
       }
 
