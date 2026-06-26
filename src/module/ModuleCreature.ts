@@ -2746,7 +2746,9 @@ export class ModuleCreature extends ModuleObject {
     // persistent combat mode (replaces the leaky per-round EffectACDecrease).
     let formACPenalty = this.getValidCombatMode()?.getArmorClassPenalty() || 0;
 
-    return baseac + classBonus + armorAC + dexBonus - formACPenalty;
+    // EffectACIncrease/Decrease (Force Armor/Aura/Shield, item buffs). dexBonus already includes
+    // EffectAbilityIncrease(DEX) via getDEX(), so DEX buffs also raise AC automatically.
+    return baseac + classBonus + armorAC + dexBonus - formACPenalty + this.getACEffectBonus();
   }
 
   getSTR(calculateBonuses = true){
@@ -2765,7 +2767,8 @@ export class ModuleCreature extends ModuleObject {
       (this.equipment.BELT?.getSTRBonus() || 0) +
       (this.equipment.CLAW1?.getSTRBonus() || 0) +
       (this.equipment.CLAW2?.getSTRBonus() || 0) +
-      (this.equipment.HIDE?.getSTRBonus() || 0);
+      (this.equipment.HIDE?.getSTRBonus() || 0) +
+      this.getAbilityEffectBonus(0); // EffectAbilityIncrease/Decrease (STR) — cascades to melee to-hit/damage
     }
   }
 
@@ -2785,7 +2788,8 @@ export class ModuleCreature extends ModuleObject {
       (this.equipment.BELT?.getDEXBonus() || 0) +
       (this.equipment.CLAW1?.getDEXBonus() || 0) +
       (this.equipment.CLAW2?.getDEXBonus() || 0) +
-      (this.equipment.HIDE?.getDEXBonus() || 0);
+      (this.equipment.HIDE?.getDEXBonus() || 0) +
+      this.getAbilityEffectBonus(1); // EffectAbilityIncrease/Decrease (DEX) — cascades to AC/reflex/ranged to-hit
     }
   }
 
@@ -2805,7 +2809,8 @@ export class ModuleCreature extends ModuleObject {
       (this.equipment.BELT?.getCONBonus() || 0) +
       (this.equipment.CLAW1?.getCONBonus() || 0) +
       (this.equipment.CLAW2?.getCONBonus() || 0) +
-      (this.equipment.HIDE?.getCONBonus() || 0);
+      (this.equipment.HIDE?.getCONBonus() || 0) +
+      this.getAbilityEffectBonus(2); // EffectAbilityIncrease/Decrease (CON) — cascades to fortitude/HP
     }
   }
 
@@ -2825,7 +2830,8 @@ export class ModuleCreature extends ModuleObject {
       (this.equipment.BELT?.getCHABonus() || 0) +
       (this.equipment.CLAW1?.getCHABonus() || 0) +
       (this.equipment.CLAW2?.getCHABonus() || 0) +
-      (this.equipment.HIDE?.getCHABonus() || 0);
+      (this.equipment.HIDE?.getCHABonus() || 0) +
+      this.getAbilityEffectBonus(5); // EffectAbilityIncrease/Decrease (CHA)
     }
   }
 
@@ -2845,7 +2851,8 @@ export class ModuleCreature extends ModuleObject {
       (this.equipment.BELT?.getWISBonus() || 0) +
       (this.equipment.CLAW1?.getWISBonus() || 0) +
       (this.equipment.CLAW2?.getWISBonus() || 0) +
-      (this.equipment.HIDE?.getWISBonus() || 0);
+      (this.equipment.HIDE?.getWISBonus() || 0) +
+      this.getAbilityEffectBonus(4); // EffectAbilityIncrease/Decrease (WIS) — cascades to will/spell DC
     }
   }
 
@@ -2865,7 +2872,8 @@ export class ModuleCreature extends ModuleObject {
       (this.equipment.BELT?.getINTBonus() || 0) +
       (this.equipment.CLAW1?.getINTBonus() || 0) +
       (this.equipment.CLAW2?.getINTBonus() || 0) +
-      (this.equipment.HIDE?.getINTBonus() || 0);
+      (this.equipment.HIDE?.getINTBonus() || 0) +
+      this.getAbilityEffectBonus(3); // EffectAbilityIncrease/Decrease (INT)
     }
   }
 
@@ -3113,7 +3121,7 @@ export class ModuleCreature extends ModuleObject {
   }
 
   getSkillLevel(value: number){
-    return this.skills[value].rank;
+    return this.skills[value].rank + this.getSkillEffectBonus(value); // + EffectSkillIncrease/Decrease
   }
 
   getHasSpell(id = 0){

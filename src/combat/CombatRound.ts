@@ -616,6 +616,9 @@ export class CombatRound {
       toHit -= combatAction.feat.getAttackPenalty();
       toHit += combatAction.feat.getAttackToHitBonus();
     }
+    // EffectAttackIncrease/Decrease (Force buffs, item/feat to-hit). getBaseAttackBonus already folds
+    // in EffectAbilityIncrease(STR/DEX) via the ability mod, so ability buffs cascade here too.
+    toHit += creature.getAttackEffectBonus();
     const attackTotal = naturalRoll + toHit;
     const targetAC = combatAction.target.getAC();
 
