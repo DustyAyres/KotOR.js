@@ -286,22 +286,22 @@ export class CharGenAbilities extends GameMenu {
     if(GameState.CharGenManager.cha <= 8 || this.creature.cha == GameState.CharGenManager.cha)
       this.CHA_MINUS_BTN.hide();
 
-    if(this.getAttributeCost(CharGenAttribute.STR) > GameState.CharGenManager.availPoints)
+    if(this.getAttributeCost(CharGenAttribute.STR) > GameState.CharGenManager.availPoints || GameState.CharGenManager.str >= 18)
       this.STR_PLUS_BTN.hide();
 
-    if(this.getAttributeCost(CharGenAttribute.DEX) > GameState.CharGenManager.availPoints)
+    if(this.getAttributeCost(CharGenAttribute.DEX) > GameState.CharGenManager.availPoints || GameState.CharGenManager.dex >= 18)
       this.DEX_PLUS_BTN.hide();
 
-    if(this.getAttributeCost(CharGenAttribute.CON) > GameState.CharGenManager.availPoints)
+    if(this.getAttributeCost(CharGenAttribute.CON) > GameState.CharGenManager.availPoints || GameState.CharGenManager.con >= 18)
       this.CON_PLUS_BTN.hide();
 
-    if(this.getAttributeCost(CharGenAttribute.WIS) > GameState.CharGenManager.availPoints)
+    if(this.getAttributeCost(CharGenAttribute.WIS) > GameState.CharGenManager.availPoints || GameState.CharGenManager.wis >= 18)
       this.WIS_PLUS_BTN.hide();
 
-    if(this.getAttributeCost(CharGenAttribute.INT) > GameState.CharGenManager.availPoints)
+    if(this.getAttributeCost(CharGenAttribute.INT) > GameState.CharGenManager.availPoints || GameState.CharGenManager.int >= 18)
       this.INT_PLUS_BTN.hide();
 
-    if(this.getAttributeCost(CharGenAttribute.CHA) > GameState.CharGenManager.availPoints)
+    if(this.getAttributeCost(CharGenAttribute.CHA) > GameState.CharGenManager.availPoints || GameState.CharGenManager.cha >= 18)
       this.CHA_PLUS_BTN.hide();
 
     this.REMAINING_SELECTIONS_LBL.setText(GameState.CharGenManager.availPoints);
