@@ -99,10 +99,6 @@ export class CharGenQuickOrCustom extends GameMenu {
         this.manager.CharGenMain.close();
       });
 
-      //Hide because this submenu is very incomplete.
-      //Comment out this line to work on the custom chargen screen
-      this.CUST_CHAR_BTN.hide();
-
       this.tGuiPanel.offset.x = -180;
       this.tGuiPanel.offset.y = 100;
       this.recalculatePosition();

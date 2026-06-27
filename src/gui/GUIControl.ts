@@ -1691,11 +1691,14 @@ export class GUIControl {
       }else{
         this.menu.setWidgetHoverActive(control, false);
       }
-      if(control.box && control.box.containsPoint(Mouse.positionUI)){
-        controls = controls.concat( control.getActiveControls() );
-      }
+      // Always descend into visible children (the recursion self-guards on
+      // widget.visible). Odyssey GUI children can extend beyond their parent's
+      // box — e.g. the +/- buttons are parented to the attribute/skill value
+      // control but sit to its right — so gating recursion on the parent box
+      // left them unhittable and unclickable.
+      controls = controls.concat( control.getActiveControls() );
     }
-    
+
     return controls;
   }
 

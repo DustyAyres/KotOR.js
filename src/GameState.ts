@@ -12,6 +12,7 @@ import type { TalentObject, TalentFeat, TalentSkill, TalentSpell } from "@/talen
 import type { ModuleObject, ModuleCreature, Module, ModuleDoor } from "@/module";
 import type { NWScript } from "@/nwscript/NWScript";
 import type { SaveGame } from "@/engine/SaveGame";
+import { TestHarness } from "@/engine/TestHarness";
 import type { GameEffectFactory } from "@/effects/GameEffectFactory";
 import type { GameEventFactory } from "@/events/GameEventFactory";
 
@@ -1165,16 +1166,22 @@ export class GameState implements EngineContext {
   static forwardVector = new THREE.Vector3(0, 0, );
 
   static Update(){
-    
+
     requestAnimationFrame( GameState.Update );
+
+    // Test harness: freeze the sim (canvas keeps the last frame) when paused.
+    if(TestHarness.paused) return;
 
     GameState.forwardVector.set(0, 0, -1);
 
-    const delta = GameState.clock.getDelta();
+    // Test harness: pin the per-frame delta for deterministic game-time when fixedDelta is set,
+    // otherwise use the real clock.
+    const delta = (TestHarness.fixedDelta != null) ? TestHarness.fixedDelta : GameState.clock.getDelta();
     GameState.processEventListener('beforeRender', [delta]);
     GameState.delta = delta;
     GameState.deltaTime += delta;
     GameState.deltaTimeFixed += (1/60);
+    TestHarness.tick(GameState.deltaTime);
 
     /**
      * Pause the main loop if the debugger is active
@@ -1261,6 +1268,12 @@ export class GameState implements EngineContext {
   }
 
   static UpdateIngame(delta: number = 0){
+    //Bail out while there is no active module/area (e.g. mid-load after the previous
+    //module was disposed but the next one — or a save being loaded — has not finished).
+    if(!GameState.module || !GameState.module.area){
+      return;
+    }
+
     //Get Selectable Objects In Range
     GameState.ModuleObjectManager.TickSelectableObjects(delta);
 
@@ -1314,6 +1327,11 @@ export class GameState implements EngineContext {
   }
 
   static UpdateDialog(delta: number = 0){
+    //Bail out while there is no active module/area (e.g. mid-load).
+    if(!GameState.module || !GameState.module.area){
+      return;
+    }
+
     if(GameState.State != EngineState.PAUSED){
       GameState.updateTime(delta);
     }

@@ -6,6 +6,7 @@ import { OdysseyTexture } from "@/three/odyssey/OdysseyTexture";
 import type { GFFStruct } from "@/resource/GFFStruct";
 import { GameState } from "@/GameState";
 import { TextureLoader } from "@/loaders";
+import { GameEngineType } from "@/enums/engine/GameEngineType";
 
 /**
  * GUIFeatItem class.
@@ -34,18 +35,39 @@ export class GUIFeatItem extends GUIProtoItem {
       super.createControl();
       //Create the actual control elements below
 
+      // K1 frames feat icons with 'lbl_indent' and chains them with 'lbl_skarr';
+      // neither texture exists in TSL, which uses 'uibit_abi_back'/'uibit_abi_arrow'
+      // (see the in-game TSL GUIFeatItem). Pick per game so the icon background is
+      // a real frame instead of the default opaque-white GUI fill material.
+      const isTSL = GameState.GameKey === GameEngineType.TSL;
+      const frameTexName = isTSL ? 'uibit_abi_back' : 'lbl_indent';
+      const arrowTexName = isTSL ? 'uibit_abi_arrow' : 'lbl_skarr';
+
       let featList = this.node;
       let spacing = 5;
       for(let i = 0; i < featList.length; i++){
         let feat = featList[i];
+        if(!feat) continue; // chained-feat groups can have sparse (undefined) slots
 
-        let hasPrereqfeat1 = (feat.prereqfeat1 == '****' || GameState.getCurrentPlayer().getHasFeat(feat.prereqfeat1));
-        let hasPrereqfeat2 = (feat.prereqfeat2 == '****' || GameState.getCurrentPlayer().getHasFeat(feat.prereqfeat2));
-        let hasFeat = GameState.getCurrentPlayer().getHasFeat(feat.__index);
+        // Support both node shapes: chargen passes TalentFeat objects (prereqFeat1
+        // is a number, -1 = none; id), while raw 2DA rows use prereqfeat1 ('****' =
+        // none; __index). Read whichever is present.
+        const prereq1 = (feat.prereqFeat1 ?? feat.prereqfeat1);
+        const prereq2 = (feat.prereqFeat2 ?? feat.prereqfeat2);
+        const featIndex = (feat.id ?? feat.__index);
+        const prereqNone = (v: any) => (v === '****' || v === undefined || v === null || v === -1 || v === '-1' || v === '');
+        const player = GameState.getCurrentPlayer();
+        let hasPrereqfeat1 = prereqNone(prereq1) || (player && player.getHasFeat(prereq1));
+        let hasPrereqfeat2 = prereqNone(prereq2) || (player && player.getHasFeat(prereq2));
 
-        console.log(feat.constant, hasPrereqfeat1, hasPrereqfeat2);
+        // Grey out only feats whose prerequisites aren't met; selectable/owned
+        // feats stay visible (the old rule hid every feat the player didn't own).
+        let locked = (!hasPrereqfeat1 || !hasPrereqfeat2);
 
-        let locked = !hasFeat || (!hasPrereqfeat1 || !hasPrereqfeat2);
+        // Blank feat.2da rows (icon '****' or empty) have no art; skip them so they
+        // don't render as opaque white squares.
+        const featIcon = feat.icon;
+        if(!featIcon || featIcon === '****') continue;
 
         let buttonIcon = new GUIButton(this.menu, this.control, this, this.scale);
         buttonIcon.setText('');
@@ -77,45 +99,68 @@ export class GUIFeatItem extends GUIProtoItem {
 
         this.widget.add(_buttonIconWidget);
 
-        TextureLoader.enQueue('lbl_indent', this.border.fill.material, TextureType.TEXTURE, (texture: OdysseyTexture) => {
-          buttonIcon.setMaterialTexture( buttonIcon.border.fill.material, texture);
-          buttonIcon.border.fill.material.transparent = true;
-          buttonIcon.setMaterialTexture( buttonIcon.highlight.fill.material, texture);
-          buttonIcon.highlight.fill.material.transparent = true;
+        // Default the frame materials invisible: TextureLoader only fires onLoad on
+        // a *successful* load, so a missing frame texture would otherwise leave the
+        // default opaque-white material showing (the original bug in TSL).
+        const frameFill = buttonIcon.border.fill.material as THREE.ShaderMaterial;
+        const frameHighlight = buttonIcon.highlight.fill.material as THREE.ShaderMaterial;
+        frameFill.visible = false;
+        frameHighlight.visible = false;
+        TextureLoader.enQueue(frameTexName, frameFill, TextureType.TEXTURE, (texture: OdysseyTexture) => {
+          if(!texture) return;
+          buttonIcon.setMaterialTexture(frameFill, texture);
+          frameFill.transparent = true;
+          buttonIcon.setMaterialTexture(frameHighlight, texture);
+          frameHighlight.transparent = true;
           if(locked){
-            (buttonIcon.getFill().material as THREE.ShaderMaterial).uniforms.opacity.value = 0.00;
+            // Prerequisite not met yet: dim the whole slot (frame + icon, below) so
+            // the chain tier is visible-but-greyed, not invisible. The original hid
+            // it entirely (opacity 0), which left a blank framed square.
+            frameFill.uniforms.opacity.value = 0.5;
+            frameHighlight.uniforms.opacity.value = 0.5;
           }
+          this.invalidateListRtt(); // the listbox renders to an RTT; re-render once the frame loads
         });
 
         buttonIcon.addEventListener('click', (e) => {
           e.stopPropagation();
+          // Clicking a feat icon selects its row (fires the listbox onSelected →
+          // highlight + enables ADD). Without this the icon's handler just swallows
+          // the click via stopPropagation, so the row can never be selected and
+          // feats can't be added.
+          if(this.list){ this.list.select(this); }
         });
 
         /* FEAT ICON */
 
-        this.widget.userData.iconMaterial = new THREE.SpriteMaterial( { map: null, color: 0xffffff } );
-        this.widget.userData.iconSprite = new THREE.Sprite( this.widget.userData.iconMaterial );
+        // Local refs (not this.widget.userData): a chained group builds several
+        // icons in this loop, and the shared userData fields were overwritten each
+        // iteration so every callback ended up targeting only the last sprite.
+        const iconMaterial = new THREE.SpriteMaterial( { map: null, color: 0xffffff } );
+        const iconSprite = new THREE.Sprite( iconMaterial );
+        iconSprite.visible = false; // shown only once its texture actually loads
 
-        this.widget.userData.iconSprite.scale.x = 32;
-        this.widget.userData.iconSprite.scale.y = 32;
-        this.widget.userData.iconSprite.position.z = 5;
-        this.widget.userData.iconSprite.renderOrder = 5;
-        TextureLoader.enQueue(feat.icon, this.widget.userData.iconMaterial, TextureType.TEXTURE, (texture: OdysseyTexture) => {
-          this.widget.userData.iconSprite.scale.x = texture.image.width;
-          this.widget.userData.iconSprite.scale.y = texture.image.height;
-          if(locked){
-            this.widget.userData.iconMaterial.opacity = 0.00;
-          }
-          this.widget.userData.iconMaterial.transparent = true;
-          this.widget.userData.iconMaterial.needsUpdate = true;
+        iconSprite.scale.x = 32;
+        iconSprite.scale.y = 32;
+        iconSprite.position.z = 5;
+        iconSprite.renderOrder = 5;
+        TextureLoader.enQueue(featIcon, iconMaterial, TextureType.TEXTURE, (texture: OdysseyTexture) => {
+          if(!texture) return;
+          iconSprite.scale.x = texture.image.width;
+          iconSprite.scale.y = texture.image.height;
+          iconMaterial.opacity = locked ? 0.5 : 1.0; // dim (don't hide) locked chain tiers
+          iconMaterial.transparent = true;
+          iconMaterial.needsUpdate = true;
+          iconSprite.visible = true;
+          this.invalidateListRtt();
         });
 
-        _buttonIconWidget.add(this.widget.userData.iconSprite);
+        _buttonIconWidget.add(iconSprite);
 
         /*
         * BLUE ARROW
         */
-        
+
         let arrowOffset = (this.extent.width/2 - buttonIcon.extent.width/2)/2;
         if(i > 0){
           let arrowIcon = new GUIButton(this.menu, this.control, this, this.scale);
@@ -147,18 +192,23 @@ export class GUIFeatItem extends GUIProtoItem {
 
           this.widget.add(_arrowIconWidget);
 
-          TextureLoader.enQueue('lbl_skarr', this.border.fill.material, TextureType.TEXTURE, (texture: OdysseyTexture) => {
-            arrowIcon.setMaterialTexture( arrowIcon.border.fill.material, texture);
-            arrowIcon.border.fill.material.transparent = true;
-            arrowIcon.setMaterialTexture( arrowIcon.highlight.fill.material, texture);
-            arrowIcon.highlight.fill.material.transparent = true;
+          const arrowFill = arrowIcon.border.fill.material as THREE.ShaderMaterial;
+          const arrowHighlight = arrowIcon.highlight.fill.material as THREE.ShaderMaterial;
+          arrowFill.visible = false;
+          arrowHighlight.visible = false;
+          TextureLoader.enQueue(arrowTexName, arrowFill, TextureType.TEXTURE, (texture: OdysseyTexture) => {
+            if(!texture) return;
+            arrowIcon.setMaterialTexture(arrowFill, texture);
+            arrowFill.transparent = true;
+            arrowIcon.setMaterialTexture(arrowHighlight, texture);
+            arrowHighlight.transparent = true;
             if(locked){
-              arrowIcon.border.fill.material.uniforms.opacity.value = 0.25;
-              arrowIcon.highlight.fill.material.uniforms.opacity.value = 0.25;
+              arrowFill.uniforms.opacity.value = 0.25;
+              arrowHighlight.uniforms.opacity.value = 0.25;
             }
+            this.invalidateListRtt();
           });
 
-          //lbl_skarr
         }
 
       }

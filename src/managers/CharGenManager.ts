@@ -3,7 +3,7 @@ import { AudioLoader } from "@/audio/AudioLoader";
 import { GameEngineType } from "@/enums/engine";
 import { ModuleCreatureArmorSlot } from "@/enums/module/ModuleCreatureArmorSlot";
 import { GFFDataType } from "@/enums/resource/GFFDataType";
-import { CharGenClasses } from "@/game/CharGenClasses";
+import { getCharGenClasses } from "@/game/CharGenClasses";
 import { GameState } from "@/GameState";
 import { LBL_3DView } from "@/gui";
 import type { ModulePlayer } from "@/module/ModulePlayer";
@@ -135,30 +135,14 @@ export class CharGenManager {
 
   static GetPlayerTemplate(nth = 0) {
     let template = new GFFObject();
-    let idx = Math.floor(Math.random() * 15);
-    let classId = 0;
-    switch (nth) {
-    case 0:
-      classId = 2;
-      break;
-    case 1:
-      classId = 1;
-      break;
-    case 2:
-      classId = 0;
-      break;
-    case 3:
-      classId = 0;
-      break;
-    case 4:
-      classId = 1;
-      break;
-    case 5:
-      classId = 2;
-      break;
-    }
+    // Class table is game-specific: K1 = Soldier/Scout/Scoundrel, TSL = the three
+    // Jedi classes. The class id and appearance pool both come from the table so
+    // the created PC is the class the slot advertises.
+    const classDef = getCharGenClasses()[nth];
+    let idx = Math.floor(Math.random() * classDef.appearances.length);
+    let classId = classDef.id;
     let portraitId = 0;
-    let appearanceIdx = CharGenClasses[nth].appearances[idx];
+    let appearanceIdx = classDef.appearances[idx];
     const portraits2DA = GameState.SWRuleSet.portraits;
     if(portraits2DA){
       for (let i = 0; i < portraits2DA.length; i++) {

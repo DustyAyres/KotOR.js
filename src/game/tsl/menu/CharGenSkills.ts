@@ -1,5 +1,6 @@
 import type { GUILabel, GUIButton, GUIListBox } from "@/gui";
 import { CharGenSkills as K1_CharGenSkills } from "@/game/kotor/KOTOR";
+import { GameState } from "@/GameState";
 
 /**
  * CharGenSkills class.
@@ -69,6 +70,82 @@ export class CharGenSkills extends K1_CharGenSkills {
     await super.menuControlInitializer(true);
     if(skipInit) return;
     return new Promise<void>((resolve, reject) => {
+
+      this.BTN_BACK.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.close();
+      });
+
+      this.BTN_ACCEPT.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cg = GameState.CharGenManager;
+        cg.selectedCreature.skills[0].rank = cg.computerUse;
+        cg.selectedCreature.skills[1].rank = cg.demolitions;
+        cg.selectedCreature.skills[2].rank = cg.stealth;
+        cg.selectedCreature.skills[3].rank = cg.awareness;
+        cg.selectedCreature.skills[4].rank = cg.persuade;
+        cg.selectedCreature.skills[5].rank = cg.repair;
+        cg.selectedCreature.skills[6].rank = cg.security;
+        cg.selectedCreature.skills[7].rank = cg.treatInjury;
+        this.close();
+      });
+
+      this.BTN_RECOMMENDED.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cg = GameState.CharGenManager;
+        cg.resetSkillPoints();
+        cg.availSkillPoints = cg.getMaxSkillPoints();
+        const skillOrder = cg.getRecommendedOrder();
+        const keys = ['computerUse','demolitions','stealth','awareness','persuade','repair','security','treatInjury'];
+        while(cg.availSkillPoints > 0){
+          for(let i = 0; i < 8; i++){
+            if(!cg.availSkillPoints) break;
+            const skillIndex = skillOrder[i];
+            if(skillIndex >= 0){
+              (cg as any)[keys[skillIndex]]++;
+              cg.availSkillPoints -= 1;
+            }
+          }
+        }
+        this.updateButtonStates();
+      });
+
+      // Per-skill +/- buttons (never wired in the original): spend/refund the
+      // available skill points. (Class-skill 2x cost and per-level max rank are a
+      // follow-up; a flat max keeps a single skill from being dumped into.)
+      const MAX_RANK = 4;
+      const skills: Array<[GUIButton, GUIButton, string]> = [
+        [this.COM_MINUS_BTN, this.COM_PLUS_BTN, 'computerUse'],
+        [this.DEM_MINUS_BTN, this.DEM_PLUS_BTN, 'demolitions'],
+        [this.STE_MINUS_BTN, this.STE_PLUS_BTN, 'stealth'],
+        [this.AWA_MINUS_BTN, this.AWA_PLUS_BTN, 'awareness'],
+        [this.PER_MINUS_BTN, this.PER_PLUS_BTN, 'persuade'],
+        [this.REP_MINUS_BTN, this.REP_PLUS_BTN, 'repair'],
+        [this.SEC_MINUS_BTN, this.SEC_PLUS_BTN, 'security'],
+        [this.TRE_MINUS_BTN, this.TRE_PLUS_BTN, 'treatInjury'],
+      ];
+      for(const [minusBtn, plusBtn, key] of skills){
+        plusBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const cg: any = GameState.CharGenManager;
+          if(cg.availSkillPoints > 0 && cg[key] < MAX_RANK){
+            cg[key]++;
+            cg.availSkillPoints--;
+            this.updateButtonStates();
+          }
+        });
+        minusBtn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const cg: any = GameState.CharGenManager;
+          if(cg[key] > 0){
+            cg[key]--;
+            cg.availSkillPoints++;
+            this.updateButtonStates();
+          }
+        });
+      }
+
+      this.updateButtonStates();
       resolve();
     });
   }

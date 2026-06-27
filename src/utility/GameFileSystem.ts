@@ -43,8 +43,91 @@ export class GameFileSystem {
     return filepath;
   }
 
+  /**
+   * WEB_TEST headless harness helpers.
+   *
+   * In ApplicationEnvironment.WEB_TEST the engine reads/writes game data over
+   * HTTP from the dev server (see webpack/gamedata-middleware.js) instead of the
+   * File System Access API, so the browser build can be driven without the
+   * directory picker. Reads come from the user's real install (read-only);
+   * writes (saves, gameinprogress) are redirected to a server-side scratch dir
+   * so the install is never mutated.
+   */
+  private static isWebTest(): boolean {
+    return ApplicationProfile.ENV == ApplicationEnvironment.WEB_TEST;
+  }
+
+  // Encode a game-relative path for the GET /gamedata/<path> file route,
+  // preserving '/' separators between segments.
+  private static webTestFileUrl(filepath: string): string {
+    const p = this.normalizePath(filepath);
+    return '/gamedata/' + p.split('/').map(encodeURIComponent).join('/');
+  }
+
+  // Build a metadata/write endpoint URL with the path passed as a query param.
+  private static webTestMetaUrl(endpoint: string, filepath: string, extra: Record<string, string> = {}): string {
+    const params = new URLSearchParams();
+    params.set('path', this.normalizePath(filepath));
+    for(const k of Object.keys(extra)) params.set(k, extra[k]);
+    return endpoint + '?' + params.toString();
+  }
+
+  /**
+   * WEB_TEST fetch concurrency gate.
+   *
+   * The engine issues large bursts of resource reads (e.g. every entry in a BIF
+   * archive). Firing thousands of fetch()es at once makes Chrome reject them with
+   * net::ERR_INSUFFICIENT_RESOURCES, which silently corrupts loads (e.g. a missing
+   * keymap.2da later crashes KeyMapper). We cap in-flight requests and retry the
+   * transient failures so loads are deterministic.
+   */
+  private static readonly webTestMaxConcurrent = 16;
+  private static webTestActive = 0;
+  private static webTestWaiters: Array<() => void> = [];
+
+  private static async webTestAcquire(): Promise<void> {
+    if(this.webTestActive < this.webTestMaxConcurrent){
+      this.webTestActive++;
+      return;
+    }
+    // Wait for a slot; release() hands the slot off without changing the count.
+    await new Promise<void>(resolve => this.webTestWaiters.push(resolve));
+  }
+
+  private static webTestReleaseSlot(): void {
+    const next = this.webTestWaiters.shift();
+    if(next){
+      next(); // hand our slot to the next waiter (active count unchanged)
+    }else{
+      this.webTestActive--;
+    }
+  }
+
+  private static async webTestFetch(url: string, init?: RequestInit): Promise<Response> {
+    await this.webTestAcquire();
+    try{
+      let lastErr: any;
+      for(let attempt = 0; attempt < 4; attempt++){
+        try{
+          return await fetch(url, init);
+        }catch(e){
+          // Network-layer failure (ERR_INSUFFICIENT_RESOURCES, transient): back off and retry.
+          lastErr = e;
+          await spleep(50 * (attempt + 1));
+        }
+      }
+      throw lastErr;
+    }finally{
+      this.webTestReleaseSlot();
+    }
+  }
+
   //filepath should be relative to the rootDirectoryPath or ApplicationProfile.directory
   static async open(filepath: string, mode: 'r'|'w' = 'r'): Promise<any> {
+    if(this.isWebTest()){
+      // Synthetic handle: just the normalized path. read()/close() use it.
+      return { __webTestPath: this.normalizePath(filepath) };
+    }
     if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
       return new Promise<number>( (resolve, reject) => {
         fs.open(path.join(ApplicationProfile.directory, filepath), (err, fd) => {
@@ -78,6 +161,20 @@ export class GameFileSystem {
   }
 
   static async read(handle: FileSystemFileHandle|number, output: Uint8Array, offset: number, length: number, position: number){
+    if(this.isWebTest()){
+      const p = (handle as any) && (handle as any).__webTestPath;
+      if(typeof p !== 'string') throw new Error('WEB_TEST read: expected a handle from GameFileSystem.open()');
+      if(!(output instanceof Uint8Array)) throw new Error('No output buffer supplied!');
+      const end = position + length - 1;
+      const res = await this.webTestFetch(this.webTestFileUrl(p), { headers: { 'Range': `bytes=${position}-${end}` } });
+      if(res.status === 416){ return output; } // requested past EOF — nothing to copy
+      if(!res.ok && res.status !== 206 && res.status !== 200){
+        throw new Error(`WEB_TEST read failed (${res.status}) for ${p}`);
+      }
+      const buf = new Uint8Array(await res.arrayBuffer());
+      output.set(buf.length > length ? buf.subarray(0, length) : buf, offset);
+      return output;
+    }
     if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
       return new Promise<Uint8Array>( (resolve, reject) => {
         fs.read(handle as number, output, offset, length, position, (err, bytes, buffer) => {
@@ -104,6 +201,9 @@ export class GameFileSystem {
   }
 
   static async close(handle: FileSystemFileHandle|number){
+    if(this.isWebTest()){
+      return; // HTTP reads are stateless — nothing to close
+    }
     if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
       return new Promise<void>( (resolve, reject) => {
         fs.close(handle as number, () => {
@@ -119,6 +219,11 @@ export class GameFileSystem {
   //filepath should be relative to the rootDirectoryPath or ApplicationProfile.directory
   static async readFile(filepath: string, options: any = {}): Promise<Uint8Array> {
     // console.log('readFile', filepath);
+    if(this.isWebTest()){
+      const res = await this.webTestFetch(this.webTestFileUrl(filepath));
+      if(!res.ok) throw new Error(`WEB_TEST readFile failed (${res.status}) for ${filepath}`);
+      return new Uint8Array(await res.arrayBuffer());
+    }
     if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
       return new Promise<Uint8Array>( (resolve, reject) => {
         fs.readFile(path.join(ApplicationProfile.directory, filepath), options, (err, buffer) => {
@@ -137,6 +242,14 @@ export class GameFileSystem {
 
   //filepath should be relative to the rootDirectoryPath or ApplicationProfile.directory
   static async writeFile(filepath: string, data: Uint8Array): Promise<boolean> {
+    if(this.isWebTest()){
+      // Writes go to the server-side scratch overlay — never the real install.
+      const res = await this.webTestFetch(this.webTestMetaUrl('/gamedata-write', filepath), {
+        method: 'POST',
+        body: data as any,
+      });
+      return res.ok;
+    }
     return new Promise<boolean>( async (resolve, reject) => {
       if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
         fs.writeFile(path.join(ApplicationProfile.directory, filepath), data, (err) => {
@@ -175,6 +288,16 @@ export class GameFileSystem {
   static async readdir(
     dirpath: string, options: IGameFileSystemReadDirOptions = {}, files: any[] = []
   ): Promise<string[]> {
+    if(this.isWebTest()){
+      const extra: Record<string, string> = {};
+      if(options.recursive) extra.recursive = '1';
+      if(options.list_dirs) extra.list_dirs = '1';
+      const res = await this.webTestFetch(this.webTestMetaUrl('/gamedata-meta/list', dirpath, extra));
+      if(!res.ok) throw new Error(`WEB_TEST readdir failed (${res.status}) for ${dirpath}`);
+      const list: string[] = await res.json();
+      for(const f of list) files.push(f);
+      return files;
+    }
     if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
       return await this.readdir_fs(dirpath, options, files);
     }else{
@@ -316,6 +439,12 @@ export class GameFileSystem {
   }
 
   static async mkdir(dirPath: string, opts: IGameFileSystemReadDirOptions = {}){
+    if(this.isWebTest()){
+      const extra: Record<string, string> = {};
+      if(opts.recursive) extra.recursive = '1';
+      const res = await this.webTestFetch(this.webTestMetaUrl('/gamedata-mkdir', dirPath, extra), { method: 'POST' });
+      return res.ok;
+    }
     return new Promise<boolean>( async (resolve, reject) => {
       dirPath = dirPath.trim();
       if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
@@ -362,6 +491,12 @@ export class GameFileSystem {
   }
 
   static async rmdir(dirPath: string, opts: IGameFileSystemReadDirOptions = {}){
+    if(this.isWebTest()){
+      const extra: Record<string, string> = {};
+      if(opts.recursive) extra.recursive = '1';
+      const res = await this.webTestFetch(this.webTestMetaUrl('/gamedata-unlink', dirPath, extra), { method: 'POST' });
+      return res.ok;
+    }
     return new Promise<boolean>( async (resolve, reject) => {
       dirPath = dirPath.trim();
       if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
@@ -414,6 +549,12 @@ export class GameFileSystem {
   }
 
   static exists(dirOrFilePath: string): Promise<boolean> {
+    if(this.isWebTest()){
+      return this.webTestFetch(this.webTestMetaUrl('/gamedata-meta/exists', dirOrFilePath))
+        .then(r => r.ok ? r.json() : { exists: false })
+        .then(j => !!j.exists)
+        .catch(() => false);
+    }
     return new Promise<boolean>( async (resolve, reject) => {
       if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
         fs.stat(path.join(ApplicationProfile.directory, dirOrFilePath), (err, stats) => {
@@ -465,6 +606,15 @@ export class GameFileSystem {
   }
 
   static async unlink(handleOrPath: string|FileSystemFileHandle){
+    if(this.isWebTest()){
+      let p: string;
+      if(typeof handleOrPath === 'string') p = this.normalizePath(handleOrPath);
+      else if((handleOrPath as any) && (handleOrPath as any).__webTestPath) p = (handleOrPath as any).__webTestPath;
+      else throw new Error('WEB_TEST unlink: supply a path string');
+      const res = await this.webTestFetch(this.webTestMetaUrl('/gamedata-unlink', p), { method: 'POST' });
+      if(!res.ok) throw new Error('WEB_TEST unlink failed for ' + p);
+      return;
+    }
     if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
       return new Promise<void>( (resolve, reject) => {
         try{
@@ -629,6 +779,10 @@ export class GameFileSystem {
   }
 
   static async initializeGameDirectory(){
+    if(this.isWebTest()){
+      // No directory picker in headless test mode — data is served over HTTP.
+      return;
+    }
     if(ApplicationProfile.ENV == ApplicationEnvironment.ELECTRON){
       ApplicationProfile.directory = ApplicationProfile.directory;
     }else{

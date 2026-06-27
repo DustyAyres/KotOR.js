@@ -66,6 +66,7 @@ export * from "@/engine/TextSprite3D";
 
 export * from "@/engine/INIConfig";
 export * from "@/engine/CurrentGame";
+export * from "@/engine/TestHarness";
 export * from "@/engine/rules";
 export * from "@/engine/pathfinding";
 
@@ -74,5 +75,6 @@ export * from "@/engine/menu/ActionMenuManager";
 export * from "@/actions/ActionFactory";
 export * from "@/effects/GameEffectFactory";
 export * from "@/events/GameEventFactory";
+export * from "@/game/kotor/CombatArena";
 
 

@@ -61,7 +61,11 @@ export class CharGenCustomPanel extends GameMenu {
 
       this.BTN_STEPNAME2.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.manager.CharGenAbilities.setCreature(GameState.getCurrentPlayer());
+        // During custom chargen there is no party/player yet (committed only at Step 6),
+        // so getCurrentPlayer() is undefined and the point-buy (all gated on this.creature)
+        // is inert — leaving abilities at the 8 baseline. Use the in-progress creature,
+        // matching the TSL CharGenCustomPanel.
+        this.manager.CharGenAbilities.setCreature(GameState.CharGenManager.selectedCreature);
         this.manager.CharGenAbilities.open();
       });
 

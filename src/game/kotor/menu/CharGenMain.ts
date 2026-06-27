@@ -3,7 +3,7 @@ import type { GUILabel } from "@/gui";
 import { TextureLoader } from "@/loaders";
 import { OdysseyTexture } from "@/three/odyssey/OdysseyTexture";
 import { OdysseyModel3D } from "@/three/odyssey";
-import { CharGenClasses } from "@/game/CharGenClasses";
+import { getCharGenClasses } from "@/game/CharGenClasses";
 import { GameState } from "@/GameState";
 
 /**
@@ -144,12 +144,47 @@ export class CharGenMain extends GameMenu {
     }
     this.LBL_NAME.setText(GameState.CharGenManager.selectedCreature.firstName);
     this.LBL_CLASS.setText(
-      GameState.TLKManager.TLKStrings[CharGenClasses[GameState.CharGenManager.selectedClass].strings.name].Value
+      GameState.TLKManager.TLKStrings[getCharGenClasses()[GameState.CharGenManager.selectedClass].strings.name].Value
     )
+    this.updateAttributes();
   }
 
+  /**
+   * Populate the chargen stat panel (ability scores, vitality, defense, saves)
+   * from the selected creature. Label names differ between K1 (maincg: NEW_VIT_LBL /
+   * NEW_DEF_LBL) and TSL (maincg_p: LBL_VIT / LBL_DEF), so each is set defensively.
+   * Called from show() and after the abilities screen accepts.
+   */
   updateAttributes() {
-
+    const creature = GameState.CharGenManager.selectedCreature;
+    if(!creature) return;
+    const set = (name: string, value: any) => {
+      const lbl = (this as any)[name] as GUILabel;
+      if(lbl && typeof (lbl as any).setText === 'function') lbl.setText(String(value));
+    };
+    set('STR_AB_LBL', creature.getSTR());
+    set('DEX_AB_LBL', creature.getDEX());
+    set('CON_AB_LBL', creature.getCON());
+    set('INT_AB_LBL', creature.getINT());
+    set('WIS_AB_LBL', creature.getWIS());
+    set('CHA_AB_LBL', creature.getCHA());
+    const vitality = creature.getMaxHP();
+    set('NEW_VIT_LBL', vitality);
+    set('LBL_VIT', vitality);
+    const defense = creature.getAC();
+    set('NEW_DEF_LBL', defense);
+    set('LBL_DEF', defense);
+    // Saves = class base (by level) + ability modifier + misc bonus.
+    const mod = (score: number) => Math.floor((score - 10) / 2);
+    const mainClass: any = creature.getMainClass();
+    const level = creature.getTotalClassLevel();
+    const st = (mainClass && Array.isArray(mainClass.savingThrows)) ? mainClass.savingThrows[level - 1] : null;
+    const fort = (st ? st.fortsave : 0) + mod(creature.getCON()) + (creature.fortbonus || 0);
+    const refl = (st ? st.refsave : 0) + mod(creature.getDEX()) + (creature.refbonus || 0);
+    const will = (st ? st.willsave : 0) + mod(creature.getWIS()) + (creature.willbonus || 0);
+    set('NEW_FORT_LBL', fort);
+    set('NEW_REFL_LBL', refl);
+    set('NEW_WILL_LBL', will);
   }
   
 }

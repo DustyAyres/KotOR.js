@@ -4,7 +4,7 @@ import { TextureLoader } from "@/loaders";
 import type { ModulePlayer } from "@/module";
 import { OdysseyModel3D } from "@/three/odyssey";
 import * as THREE from "three";
-import { CharGenClasses } from "@/game/CharGenClasses";
+import { getCharGenClasses } from "@/game/CharGenClasses";
 import { GameState } from "@/GameState";
 
 /**
@@ -296,15 +296,19 @@ export class CharGenClass extends GameMenu {
             modelControl.extent.width = Math.max(modelControl.extent.width - 1, this._baseModelExtent.width);
           }
         }
-        _3dView.setSize(modelControl.extent.width * 2, modelControl.extent.height * 2);
+        // Supersample the small class previews (4x the control size). At 2x, fine
+        // facial features (eyebrows / eye-socket shading) aliased into a thin dark
+        // line across the face; rendering larger and downsampling cleans that up.
+        _3dView.setSize(modelControl.extent.width * 4, modelControl.extent.height * 4);
         _3dView.render(delta);
         (modelControl.getFill().material as THREE.ShaderMaterial).needsUpdate = true;
         btnControl.resizeControl();
         modelControl.resizeControl();
       }
       if (this.textNeedsUpdate) {
-        this.LBL_DESC.setText(GameState.TLKManager.TLKStrings[CharGenClasses[GameState.CharGenManager.hoveredClass].strings.description].Value);
-        this.LBL_CLASS.setText(GameState.TLKManager.TLKStrings[CharGenClasses[GameState.CharGenManager.hoveredClass].strings.gender].Value + ' ' + GameState.TLKManager.TLKStrings[CharGenClasses[GameState.CharGenManager.hoveredClass].strings.name].Value);
+        const classDef = getCharGenClasses()[GameState.CharGenManager.hoveredClass];
+        this.LBL_DESC.setText(GameState.TLKManager.TLKStrings[classDef.strings.description].Value);
+        this.LBL_CLASS.setText(GameState.TLKManager.TLKStrings[classDef.strings.gender].Value + ' ' + GameState.TLKManager.TLKStrings[classDef.strings.name].Value);
         this.textNeedsUpdate = false;
       }
     } catch (e: any) {
