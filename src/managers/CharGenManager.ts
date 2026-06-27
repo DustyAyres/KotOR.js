@@ -301,19 +301,18 @@ export class CharGenManager {
   /**
    * Level-1 Force Point pool.
    *
-   * [Unverified] PLACEHOLDER FORMULA. The exact L1 FP pool is the one chargen
-   * rule not encoded in any 2DA and not yet located in the swkotor2.exe dump.
-   * classes.2da `forcedie` is Guardian 4 / Sentinel 6 / Consular 8; KotOR II is
-   * known to add Wisdom and Charisma modifier contributions to the Force pool in
-   * some formulas. Until the FP-init routine is confirmed (RE or empirical read
-   * from a real TSL install), use forcedie + WIS mod + CHA mod, floored at the
-   * forcedie so a low-WIS/CHA Jedi never drops below the die. REPLACE once resolved.
+   * Confirmed from the swkotor2.exe dump (GetMaxForcePoints = FUN_0057eca0): each
+   * Force-class level contributes `max(1, forcedie + WIS_modifier)`, then
+   * BonusForcePoints (GFF) and conditional feat/item bonuses are added. Charisma
+   * is NOT part of the formula (the common "WIS + CHA" guess is refuted by the
+   * binary — only field 0xf6, the Wisdom modifier, feeds the pool). classes.2da
+   * `forcedie` = Guardian 4 / Sentinel 6 / Consular 8. At creation BonusForcePoints
+   * is 0, so L1 FP = max(1, forcedie + WIS mod).
    */
   static getMaxForcePoints(creature: ModulePlayer, mainClass: any, _level = 1) {
-    const mod = CharGenManager.abilityMod;
     const forcedie = mainClass.forcedie || 0;
-    const fp = forcedie + mod(creature.getWIS()) + mod(creature.getCHA());
-    return Math.max(forcedie, fp);
+    if (!forcedie) return 0; // non-Force class contributes nothing
+    return Math.max(1, forcedie + CharGenManager.abilityMod(creature.getWIS()));
   }
 
   static resetSkillPoints() {
