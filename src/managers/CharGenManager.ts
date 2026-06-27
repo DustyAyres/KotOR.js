@@ -16,6 +16,7 @@ import { AudioEngine } from "@/audio/AudioEngine";
 import { LTRObject } from "@/resource/LTRObject";
 import { MDLLoader, ResourceLoader } from "@/loaders";
 import { ResourceTypes } from "@/resource/ResourceTypes";
+import { TalentFeat } from "@/talents";
 
 /**
  * CharGenManager class.
@@ -296,6 +297,38 @@ export class CharGenManager {
     const maxFP = CharGenManager.getMaxForcePoints(creature, mainClass, level);
     creature.maxForcePoints = maxFP;
     creature.forcePoints = maxFP;
+
+    // Auto-granted class feats (weapon proficiencies, Power Attack, Force Chain,
+    // Jedi Defense, etc.). The Feats screen grants these when visited, but grant
+    // them here too so a finalized PC always has them even if that step was skipped.
+    CharGenManager.grantAutomaticFeats(creature);
+  }
+
+  /**
+   * Grant the feats a PC of this class receives automatically at creation —
+   * feat.2da <class>_pc_granted == 1 (e.g. jgd_pc_granted): the weapon
+   * proficiencies, Power Attack/Power Blast/etc., Jedi Defense, Force Chain ...
+   *
+   * Note this is the PC-granted column, NOT the K1 status-3 `_granted` mechanism
+   * (which the inherited CharGenFeats.addGrantedFeats uses): for the TSL Jedi
+   * classes no feat has list-status 3, so the inherited path grants them nothing.
+   * Some PC-granted feats (e.g. Force Chain) have list status 4 "unavailable to
+   * pick", so this is intentionally NOT gated on isFeatAvailable. Idempotent.
+   */
+  static grantAutomaticFeats(creature: ModulePlayer) {
+    const mainClass: any = creature.getMainClass();
+    if (!mainClass || !mainClass.featstable) return;
+    const pcGrantedKey = mainClass.featstable.toLowerCase() + 'PcGranted';
+    const feats = GameState.SWRuleSet.feats;
+    const count = GameState.SWRuleSet.featCount;
+    for (let i = 0; i < count; i++) {
+      const feat: any = feats[i];
+      if (!feat || !feat.constant) continue; // skip blank placeholder rows
+      if (parseInt(feat[pcGrantedKey]) === 1 && !creature.getHasFeat(i)) {
+        // Index i is the feat id; new TalentFeat(id) carries it (From2DA does not).
+        creature.addFeat(new TalentFeat(i));
+      }
+    }
   }
 
   /**
