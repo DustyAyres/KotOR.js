@@ -333,7 +333,34 @@ export class CharGenManager {
   
 
   static getMaxSkillPoints() {
-    return 10 + parseInt(CharGenManager.selectedCreature.classes[0].skillpointbase as any);
+    const cre = CharGenManager.selectedCreature;
+    const base = parseInt(cre.classes[0].skillpointbase as any) || 0;
+    const intMod = CharGenManager.abilityMod(cre.getINT());
+    // d20/KotOR: per-level points = skillpointbase + INT modifier; the FIRST
+    // level grants x4 that amount, with a floor of 4. (Chargen is always L1.)
+    return Math.max(4, (base + intMod) * 4);
+  }
+
+  /**
+   * True if the indexed skill (0..7, matching the SkillList order) is a class
+   * skill for the selected class, per skills.2da's <skillstable>_class flag.
+   */
+  static isClassSkill(skillIndex: number) {
+    const skills2da = GameState.TwoDAManager.datatables.get('skills');
+    const row = skills2da?.rows?.[skillIndex];
+    if (!row) return false;
+    return parseInt(row[CharGenManager.getSkillTableColumn()]) === 1;
+  }
+
+  /** Rank cost: class skill = 1 point/rank, cross-class = 2 points/rank. */
+  static getSkillCost(skillIndex: number) {
+    return CharGenManager.isClassSkill(skillIndex) ? 1 : 2;
+  }
+
+  /** Max rank: class skill = level + 3 (4 @ L1); cross-class = (level+3)/2 (2 @ L1). */
+  static getSkillMaxRank(skillIndex: number) {
+    const level = CharGenManager.selectedCreature?.getTotalClassLevel() || 1;
+    return CharGenManager.isClassSkill(skillIndex) ? (level + 3) : Math.floor((level + 3) / 2);
   }
 
   static getSkillTableColumn() {

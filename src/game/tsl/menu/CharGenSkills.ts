@@ -97,13 +97,20 @@ export class CharGenSkills extends K1_CharGenSkills {
         cg.availSkillPoints = cg.getMaxSkillPoints();
         const skillOrder = cg.getRecommendedOrder();
         const keys = ['computerUse','demolitions','stealth','awareness','persuade','repair','security','treatInjury'];
-        while(cg.availSkillPoints > 0){
+        // Spend in recommended priority order, honouring per-skill cost (class 1 /
+        // cross-class 2) and the max-rank cap. Stop when a full pass raises nothing
+        // (out of points or everything capped) so we never spin forever.
+        let raisedAny = true;
+        while(cg.availSkillPoints > 0 && raisedAny){
+          raisedAny = false;
           for(let i = 0; i < 8; i++){
-            if(!cg.availSkillPoints) break;
             const skillIndex = skillOrder[i];
-            if(skillIndex >= 0){
+            if(skillIndex < 0) continue;
+            const cost = cg.getSkillCost(skillIndex);
+            if(cg.availSkillPoints >= cost && (cg as any)[keys[skillIndex]] < cg.getSkillMaxRank(skillIndex)){
               (cg as any)[keys[skillIndex]]++;
-              cg.availSkillPoints -= 1;
+              cg.availSkillPoints -= cost;
+              raisedAny = true;
             }
           }
         }
@@ -111,9 +118,10 @@ export class CharGenSkills extends K1_CharGenSkills {
       });
 
       // Per-skill +/- buttons (never wired in the original): spend/refund the
-      // available skill points. (Class-skill 2x cost and per-level max rank are a
-      // follow-up; a flat max keeps a single skill from being dumped into.)
-      const MAX_RANK = 4;
+      // available skill points, honouring the d20 rules — class skills cost 1
+      // point/rank and cap at level+3 (4 @ L1); cross-class skills cost 2 and cap
+      // at (level+3)/2 (2 @ L1). The array order is the SkillList index (0..7),
+      // which getSkillCost/getSkillMaxRank key off via skills.2da.
       const skills: Array<[GUIButton, GUIButton, string]> = [
         [this.COM_MINUS_BTN, this.COM_PLUS_BTN, 'computerUse'],
         [this.DEM_MINUS_BTN, this.DEM_PLUS_BTN, 'demolitions'],
@@ -124,13 +132,14 @@ export class CharGenSkills extends K1_CharGenSkills {
         [this.SEC_MINUS_BTN, this.SEC_PLUS_BTN, 'security'],
         [this.TRE_MINUS_BTN, this.TRE_PLUS_BTN, 'treatInjury'],
       ];
-      for(const [minusBtn, plusBtn, key] of skills){
+      skills.forEach(([minusBtn, plusBtn, key], skillIndex) => {
         plusBtn?.addEventListener('click', (e) => {
           e.stopPropagation();
           const cg: any = GameState.CharGenManager;
-          if(cg.availSkillPoints > 0 && cg[key] < MAX_RANK){
+          const cost = cg.getSkillCost(skillIndex);
+          if(cg.availSkillPoints >= cost && cg[key] < cg.getSkillMaxRank(skillIndex)){
             cg[key]++;
-            cg.availSkillPoints--;
+            cg.availSkillPoints -= cost;
             this.updateButtonStates();
           }
         });
@@ -139,11 +148,11 @@ export class CharGenSkills extends K1_CharGenSkills {
           const cg: any = GameState.CharGenManager;
           if(cg[key] > 0){
             cg[key]--;
-            cg.availSkillPoints++;
+            cg.availSkillPoints += cg.getSkillCost(skillIndex);
             this.updateButtonStates();
           }
         });
-      }
+      });
 
       this.updateButtonStates();
       resolve();
