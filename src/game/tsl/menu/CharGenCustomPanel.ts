@@ -98,6 +98,11 @@ export class CharGenCustomPanel extends K1_CharGenCustomPanel {
         if(firstNameField) firstNameField.setValue(creature.firstName || '');
         creature.equipment.ARMOR = undefined;
         creature.template.getFieldByLabel('Equip_ItemList').childStructs = [];
+        // Compute the derived combat stats (Max HP, saving throws, Force Points)
+        // from class + abilities and write them onto the creature BEFORE save(),
+        // which serializes them into the PlayerTemplate. Without this the custom
+        // path ships the placeholder template values (HP 20 / saves 0 / FP 0).
+        GameState.CharGenManager.finalizeDerivedStats(creature);
         GameState.GlobalVariableManager.Init();
         GameState.PartyManager.PlayerTemplate = GameState.CharGenManager.selectedCreature.save();
         GameState.PartyManager.ActualPlayerTemplate = GameState.PartyManager.PlayerTemplate;

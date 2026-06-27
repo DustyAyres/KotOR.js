@@ -248,6 +248,74 @@ export class CharGenManager {
 
   
 
+  /**
+   * Ability modifier (d20): floor((score - 10) / 2).
+   */
+  static abilityMod(score: number) {
+    return Math.floor((score - 10) / 2);
+  }
+
+  /**
+   * Compute and store the derived combat stats for a freshly created PC, BEFORE
+   * the template is serialized (save()). The custom-creation path previously left
+   * these as the placeholder template values (Max HP 20, saves 0, FP 0), so a
+   * custom Jedi was cosmetically right but mechanically broken.
+   *
+   * - Max HP   = class hit die + CON modifier (KotOR takes the full hit die at L1,
+   *              it does not roll). Stored on all three HP fields so the creature
+   *              spawns at full health (getHP()/getMaxHP()).
+   * - Saves    = class base save (by level, from cls_st_*) + ability modifier.
+   *              The runtime save roll adds creature.fortitudeSaveThrow directly
+   *              (NOT fortbonus), so the ability modifier must be baked in here.
+   * - Force PP = class force pool (see getMaxForcePoints — formula flagged).
+   *
+   * Defense/AC is intentionally NOT written here: getAC() already derives it
+   * (10 + DEX mod + class AC bonus + armor + effects) and save() serializes
+   * getAC(), so AC is correct without a stored override.
+   */
+  static finalizeDerivedStats(creature: ModulePlayer) {
+    if (!creature) return;
+    const mainClass: any = creature.getMainClass();
+    if (!mainClass) return;
+    const level = creature.getTotalClassLevel() || 1;
+    const mod = CharGenManager.abilityMod;
+
+    // Max HP = hit die + CON modifier (minimum 1).
+    const maxHP = Math.max(1, mainClass.hitdie + mod(creature.getCON()));
+    creature.maxHitPoints = maxHP;
+    creature.currentHitPoints = maxHP;
+    creature.hitPoints = maxHP;
+
+    // Saving throws = class base (by level) + ability modifier. Fort↔CON, Ref↔DEX, Will↔WIS.
+    const st = Array.isArray(mainClass.savingThrows) ? mainClass.savingThrows[level - 1] : null;
+    creature.fortitudeSaveThrow = (st ? st.fortsave : 0) + mod(creature.getCON());
+    creature.reflexSaveThrow    = (st ? st.refsave  : 0) + mod(creature.getDEX());
+    creature.willSaveThrow      = (st ? st.willsave : 0) + mod(creature.getWIS());
+
+    // Force Points.
+    const maxFP = CharGenManager.getMaxForcePoints(creature, mainClass, level);
+    creature.maxForcePoints = maxFP;
+    creature.forcePoints = maxFP;
+  }
+
+  /**
+   * Level-1 Force Point pool.
+   *
+   * [Unverified] PLACEHOLDER FORMULA. The exact L1 FP pool is the one chargen
+   * rule not encoded in any 2DA and not yet located in the swkotor2.exe dump.
+   * classes.2da `forcedie` is Guardian 4 / Sentinel 6 / Consular 8; KotOR II is
+   * known to add Wisdom and Charisma modifier contributions to the Force pool in
+   * some formulas. Until the FP-init routine is confirmed (RE or empirical read
+   * from a real TSL install), use forcedie + WIS mod + CHA mod, floored at the
+   * forcedie so a low-WIS/CHA Jedi never drops below the die. REPLACE once resolved.
+   */
+  static getMaxForcePoints(creature: ModulePlayer, mainClass: any, _level = 1) {
+    const mod = CharGenManager.abilityMod;
+    const forcedie = mainClass.forcedie || 0;
+    const fp = forcedie + mod(creature.getWIS()) + mod(creature.getCHA());
+    return Math.max(forcedie, fp);
+  }
+
   static resetSkillPoints() {
     for (let i = 0; i < 8; i++) {
       CharGenManager.selectedCreature.skills[i].rank = 0;
