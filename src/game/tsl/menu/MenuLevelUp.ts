@@ -209,9 +209,13 @@ export class MenuLevelUp extends K1_MenuLevelUp {
   }
 
   openFeatsStep(){
-    // Wired in a later slice (manual feat selection). Placeholder: mark done.
+    const cg = GameState.CharGenManager;
+    cg.levelUpMode = true;
+    cg.selectedCreature = this.creature as any;
+    // CharGenFeats.show() reads featGainPoints[newLevel-1] for the selectable count, auto-grants
+    // this level's class feats, and adds picks to the creature — exactly what level-up needs.
     this.done.feats = true;
-    this.updateStepPanel();
+    this.manager.CharGenFeats.open();
   }
 
   openAttributesStep(){
