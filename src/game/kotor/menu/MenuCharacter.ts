@@ -234,6 +234,18 @@ export class MenuCharacter extends GameMenu {
     this.LBL_VITALITY_STAT?.setText(character.getHP() + '/' + character.getMaxHP());
     this.LBL_FORCE_STAT?.setText(character.getFP() + '/' + character.getMaxFP());
     this.LBL_DEFENSE_STAT?.setText(character.getAC());
+    // Saving throws = class base (by level, from cls_st_*) + ability modifier + stored
+    // bonus. These were never populated, so the screen showed the .gui placeholder (18).
+    // Fort<->CON, Ref<->DEX, Will<->WIS (matches the chargen stat panel).
+    {
+      const saveMod = (score: number) => Math.floor((score - 10) / 2);
+      const mainClass: any = character.getMainClass();
+      const charLevel = character.getTotalClassLevel();
+      const st = (mainClass && Array.isArray(mainClass.savingThrows)) ? mainClass.savingThrows[charLevel - 1] : null;
+      this.LBL_FORTITUDE_STAT?.setText((st ? st.fortsave : 0) + saveMod(character.getCON()) + ((character as any).fortbonus || 0));
+      this.LBL_REFLEX_STAT?.setText((st ? st.refsave : 0) + saveMod(character.getDEX()) + ((character as any).refbonus || 0));
+      this.LBL_WILL_STAT?.setText((st ? st.willsave : 0) + saveMod(character.getWIS()) + ((character as any).willbonus || 0));
+    }
     this.LBL_STR?.setText(character.getSTR());
     this.LBL_DEX?.setText(character.getDEX());
     this.LBL_CON?.setText(character.getCON());
