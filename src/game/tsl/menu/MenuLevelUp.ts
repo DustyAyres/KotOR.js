@@ -53,6 +53,10 @@ export class MenuLevelUp extends K1_MenuLevelUp {
   private snapshot: any = null;
   /** Lazily-loaded force-power selection step (no shared loader registers it). */
   private powersMenu: MenuLevelUpPowers = null as any;
+  /** Static per-slot step labels captured from the .gui. */
+  private stepLabels: { [k: string]: string } = {};
+  /** Which step each visible slot (1..5) currently maps to. */
+  private slotStep: { [slot: number]: string } = {};
 
   constructor(){
     super();
@@ -72,30 +76,24 @@ export class MenuLevelUp extends K1_MenuLevelUp {
       });
       this._button_b = this.BTN_BACK;
 
-      this.BTN_STEPNAME1.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if(this.steps.attributes) this.openAttributesStep();
-      });
+      // Capture the static per-slot step labels from the .gui (Attributes/Skills/Feats/
+      // Powers/Accept) before we start reassigning them to consecutive slots.
+      this.stepLabels = {
+        attributes: this.BTN_STEPNAME1.getText(),
+        skills: this.BTN_STEPNAME2.getText(),
+        feats: this.BTN_STEPNAME3.getText(),
+        powers: this.BTN_STEPNAME4.getText(),
+        accept: this.BTN_STEPNAME5.getText(),
+      };
 
-      this.BTN_STEPNAME2.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if(this.steps.skills) this.openSkillsStep();
-      });
-
-      this.BTN_STEPNAME3.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if(this.steps.feats) this.openFeatsStep();
-      });
-
-      this.BTN_STEPNAME4.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if(this.steps.powers) this.openPowersStep();
-      });
-
-      this.BTN_STEPNAME5.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.accept();
-      });
+      // Step rows are packed into consecutive slots (see updateStepPanel), so each button
+      // dispatches via the slot->step mapping rather than a fixed step.
+      for(let i = 1; i <= 5; i++){
+        (this as any)['BTN_STEPNAME' + i].addEventListener('click', (e: any) => {
+          e.stopPropagation();
+          this.onStepClick(i);
+        });
+      }
 
       resolve();
     });
@@ -181,25 +179,59 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     this.updateStepPanel();
   }
 
-  /** Render the 5-step panel: label each step, disable inapplicable/locked ones, show progress. */
-  updateStepPanel(){
-    const cfg: Array<[GUIButton, GUILabel, boolean]> = [
-      [this.BTN_STEPNAME1, this.LBL_NUM1, this.steps.attributes],
-      [this.BTN_STEPNAME2, this.LBL_NUM2, this.steps.skills],
-      [this.BTN_STEPNAME3, this.LBL_NUM3, this.steps.feats],
-      [this.BTN_STEPNAME4, this.LBL_NUM4, this.steps.powers],
-      [this.BTN_STEPNAME5, this.LBL_NUM5, true], // Accept always available once required steps done
-    ];
-    for(const [btn, , applicable] of cfg){
-      if(!btn) continue;
-      if(applicable){ btn.show?.(); } else { btn.hide?.(); }
-    }
-    // Accept is enabled only when every applicable step is complete.
-    const ready = (!this.steps.attributes || this.done.attributes)
+  /** The active steps for this level-up, in engine order (Accept always last). */
+  getActiveSteps(): string[] {
+    const list: string[] = [];
+    if(this.steps.attributes) list.push('attributes');
+    if(this.steps.skills) list.push('skills');
+    if(this.steps.feats) list.push('feats');
+    if(this.steps.powers) list.push('powers');
+    list.push('accept');
+    return list;
+  }
+
+  /** True when every applicable step (all but Accept) has been visited/completed. */
+  isReadyToAccept(){
+    return (!this.steps.attributes || this.done.attributes)
       && (!this.steps.skills || this.done.skills)
       && (!this.steps.feats || this.done.feats)
       && (!this.steps.powers || this.done.powers);
-    if(ready){ this.BTN_STEPNAME5?.show?.(); } else { this.BTN_STEPNAME5?.hide?.(); }
+  }
+
+  /**
+   * Render the step panel by packing the active steps into consecutive slots (1..N) with a
+   * running number — mirroring the engine's CSWGuiLevelUpPanel, which builds an ordered list
+   * of active steps with a running counter. Inapplicable steps leave no empty numbered circle.
+   */
+  updateStepPanel(){
+    const active = this.getActiveSteps();
+    this.slotStep = {};
+    for(let slot = 1; slot <= 5; slot++){
+      const lblCircle = (this as any)['LBL_' + slot];
+      const lblNum = (this as any)['LBL_NUM' + slot];
+      const btn = (this as any)['BTN_STEPNAME' + slot];
+      const step = active[slot - 1];
+      // The Accept row only appears once the other steps are done.
+      if(step && !(step === 'accept' && !this.isReadyToAccept())){
+        this.slotStep[slot] = step;
+        lblNum?.setText?.(String(slot));
+        btn?.setText?.(this.stepLabels[step] || '');
+        lblCircle?.show?.(); lblNum?.show?.(); btn?.show?.();
+      } else {
+        lblCircle?.hide?.(); lblNum?.hide?.(); btn?.hide?.();
+      }
+    }
+  }
+
+  /** Dispatch a slot click to the step it currently maps to. */
+  onStepClick(slot: number){
+    switch(this.slotStep[slot]){
+      case 'attributes': this.openAttributesStep(); break;
+      case 'skills': this.openSkillsStep(); break;
+      case 'feats': this.openFeatsStep(); break;
+      case 'powers': this.openPowersStep(); break;
+      case 'accept': this.accept(); break;
+    }
   }
 
   // ---- Steps -------------------------------------------------------------
@@ -251,6 +283,7 @@ export class MenuLevelUp extends K1_MenuLevelUp {
   /** Commit the level: apply HP/FP gains (skills/feats/etc. already written by their steps). */
   accept(){
     if(!this.creature) { this.close(); return; }
+    if(!this.isReadyToAccept()) return; // complete the other steps first
     const cls = this.creature.classes[this.levelClassIndex];
     // Skills/feats/abilities/powers were applied by their step screens; the class level was
     // already incremented at startLevelUp. Apply the HP/FP gains for this level.
