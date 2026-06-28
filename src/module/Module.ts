@@ -2,6 +2,7 @@ import * as THREE from "three";
 import * as path from "path";
 import { AudioEmitter } from "@/audio/AudioEmitter";
 import { GameEffect } from "@/effects";
+import { WeaponProjectile } from "@/combat/WeaponProjectile";
 import EngineLocation from "@/engine/EngineLocation";
 import { GameState } from "@/GameState";
 import { CExoLocString } from "@/resource/CExoLocString";
@@ -417,6 +418,9 @@ export class Module {
 
       this.timeManager.update(delta);
 
+      // Advance any in-flight weapon projectiles (blaster bolts).
+      WeaponProjectile.updateAll(delta);
+
     }
 
   }
@@ -523,7 +527,10 @@ export class Module {
 
   dispose(){
     GameState.collisionList = [];
-    
+
+    //Remove any in-flight weapon projectiles (blaster bolts)
+    WeaponProjectile.disposeAll();
+
     //Remove all effects
     if(this){
       while(this.effects.length){

@@ -18,6 +18,7 @@ import { DiceType } from "@/enums/combat/DiceType";
 import { TextSprite3D } from "@/engine/TextSprite3D";
 import { BitWise } from "@/utility/BitWise";
 import { CombatAttackData } from "@/combat/CombatAttackData";
+import { WeaponProjectile } from "@/combat/WeaponProjectile";
 import type { CombatRoundAction } from "@/combat/CombatRoundAction";
 import type { TalentFeat } from "@/talents";
 import { GameState } from "@/GameState";
@@ -431,16 +432,39 @@ export class CombatRound {
           }
         }
       }else if(creature && creature.isSimpleCreature()){
-        if(creature.equipment.CLAW1){
-          this.calculateWeaponAttack(creature, creature.equipment.CLAW1, ModuleCreatureArmorSlot.CLAW1, combatAction);
-        }
+        const hasClaws = !!(creature.equipment.CLAW1 || creature.equipment.CLAW2 || creature.equipment.CLAW3);
+        if(hasClaws){
+          /**
+           * Creature (natural) weapons — claws/bites for beasts.
+           */
+          if(creature.equipment.CLAW1){
+            this.calculateWeaponAttack(creature, creature.equipment.CLAW1, ModuleCreatureArmorSlot.CLAW1, combatAction);
+          }
 
-        if(creature.equipment.CLAW2){
-          this.calculateWeaponAttack(creature, creature.equipment.CLAW2, ModuleCreatureArmorSlot.CLAW2, combatAction);
-        }
+          if(creature.equipment.CLAW2){
+            this.calculateWeaponAttack(creature, creature.equipment.CLAW2, ModuleCreatureArmorSlot.CLAW2, combatAction);
+          }
 
-        if(creature.equipment.CLAW3){
-          this.calculateWeaponAttack(creature, creature.equipment.CLAW3, ModuleCreatureArmorSlot.CLAW3, combatAction);
+          if(creature.equipment.CLAW3){
+            this.calculateWeaponAttack(creature, creature.equipment.CLAW3, ModuleCreatureArmorSlot.CLAW3, combatAction);
+          }
+        }else{
+          /**
+           * Hand-weapon wielders flagged simple by their model type (the 'L' models:
+           * droids, turrets, Selkath, …) carry a normal weapon in a hand slot rather
+           * than creature claws. Without this they swing nothing and deal 0 damage.
+           */
+          if(!creature.equipment.RIGHTHAND && !creature.equipment.LEFTHAND){
+            this.calculateWeaponAttack(creature, undefined, ModuleCreatureArmorSlot.RIGHTHAND, combatAction);
+          }
+
+          if(creature.equipment.RIGHTHAND){
+            this.calculateWeaponAttack(creature, creature.equipment.RIGHTHAND, ModuleCreatureArmorSlot.RIGHTHAND, combatAction);
+          }
+
+          if(creature.equipment.LEFTHAND){
+            this.calculateWeaponAttack(creature, creature.equipment.LEFTHAND, ModuleCreatureArmorSlot.LEFTHAND, combatAction);
+          }
         }
       }
     }
@@ -658,6 +682,11 @@ export class CombatRound {
 
     // Log to combat menu - create feedback message for the attack result
     this.logAttackResult(creature, weapon, combatAction, isCritical, hasAssuredHit);
+
+    // Ranged weapons fire a visible bolt (muzzle flash + travelling streak + shot/impact
+    // sounds), one per shot, hit or miss. No-op for melee/unarmed — fireFromWeapon bails
+    // when the weapon has no ammunition type.
+    WeaponProjectile.fireFromWeapon(weapon, creature, combatAction.target);
 
     this.currentAttack++;
   }
