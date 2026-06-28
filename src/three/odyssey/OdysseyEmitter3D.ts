@@ -1110,7 +1110,10 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
     const target = OdysseyEmitter3D._v3B.set(0, 0, 0);
     this.referenceNode.getWorldPosition(target);
 
-    let scale = 0.5;
+    // Bolt width from the authored emitter size (SizeStart / XSize), not a hard-coded constant.
+    // A lightning model carries several strands with different sizes -> layered thin+thick bolts
+    // like vanilla, instead of one uniform fat band.
+    let scale = Math.max(this.sizes[0] || 0, this.size.x || 0, 0.05) * 2.0;
 
     let gridX1 = 2;
     let indices: number[] = [];
@@ -1127,14 +1130,35 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
         this.parent.quaternion.set(0, 0, 0, 1);
 
       this._lightningDelay = 0;
+
+      // Ribbon orientation: present the strip's full width to the camera by offsetting each segment
+      // perpendicular to BOTH the bolt axis and the view direction. The old code offset along world
+      // X, which went edge-on (invisibly thin) whenever the bolt ran along X or the camera looked
+      // down it. Fall back to a world-up perpendicular when there's no camera/context.
+      const boltDir = new THREE.Vector3().subVectors(target, start);
+      if(boltDir.lengthSq() < 1e-8) boltDir.set(0, 0, 1);
+      boltDir.normalize();
+      const cam = this.context?.currentCamera as THREE.Camera | undefined;
+      const camPos = new THREE.Vector3();
+      const hasCam = !!cam;
+      if(cam) cam.getWorldPosition(camPos);
+      const halfWidth = scale * 0.5;
+      const segCount = Math.max(1, lightningZigZag - 1);
+      const pPoint = new THREE.Vector3();
+      const perp = new THREE.Vector3();
+      const viewDir = new THREE.Vector3();
+      const worldUp = new THREE.Vector3(0, 0, 1);
+
       for(let iy = 0; iy < lightningZigZag; iy++){
-        let percentage = iy/lightningZigZag;
+        // Reach a full 1.0 at the last point so the bolt actually lands on the target — the old
+        // iy/lightningZigZag stopped one segment short, so the arc never quite touched the victim.
+        let percentage = iy/segCount;
         let x = start.x + ( (target.x - start.x) * percentage);
         let y = start.y + ( (target.y - start.y) * percentage);
         let z = start.z + ( (target.z - start.z) * percentage);
 
         if(iy === 0){
-          // First vertex: keep at start position
+          // First vertex: keep at start position (the caster's hand)
         }else if(iy + 1 === lightningZigZag){
           x = this.randomFloat(x, this.lightningRadius);
           y = this.randomFloat(y, this.lightningRadius);
@@ -1145,13 +1169,24 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
           z = this.randomFloat(z, spread);
         }
 
-        for ( let ix = 0; ix < 2; ix ++ ) {
-          let xO = scale/2;
-          if(ix == 1){
-            xO = -scale/2;
-          }
+        // Camera-facing perpendicular for this centreline point.
+        pPoint.set(x, y, z);
+        if(hasCam){
+          viewDir.subVectors(camPos, pPoint);
+          perp.crossVectors(boltDir, viewDir);
+        }else{
+          perp.crossVectors(boltDir, worldUp);
+        }
+        if(perp.lengthSq() < 1e-8) perp.set(1, 0, 0);
+        perp.normalize().multiplyScalar(halfWidth);
 
-          vertices.push( x + xO, - y, z );
+        for ( let ix = 0; ix < 2; ix ++ ) {
+          const sgn = ix === 0 ? 1 : -1;
+
+          // World-space vert: the LIGHTNING shader renders `position` directly through viewMatrix
+          // only (no model matrix), so these must be true world coords (Y as-is — negating it
+          // mirrored the bolt across y=0, off-screen wherever world Y != 0).
+          vertices.push( x + perp.x*sgn, y + perp.y*sgn, z + perp.z*sgn );
           normals.push( 0, 0, 1 );
           uvs.push( ix / 1 );
           uvs.push( 1 - ( iy / (lightningZigZag-1) ) );

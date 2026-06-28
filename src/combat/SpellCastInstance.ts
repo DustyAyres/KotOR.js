@@ -3,9 +3,12 @@ import type { TalentSpell } from "@/talents";
 import * as THREE from "three";
 import { OdysseyModel3D } from "@/three/odyssey";
 // import { NWScript } from "@/nwscript/NWScript";
-import { OdysseyModel } from "@/odyssey";
+import { OdysseyModel, OdysseyModelAnimation } from "@/odyssey";
 import { GameState } from "@/GameState";
 import { MDLLoader } from "@/loaders";
+import { ModuleObjectType } from "@/enums";
+import { ModuleCreatureAnimState } from "@/enums/module/ModuleCreatureAnimState";
+import { BitWise } from "@/utility/BitWise";
 
 /**
  * SpellCastInstance class.
@@ -48,6 +51,7 @@ export class SpellCastInstance {
   completed: boolean = false;
   conjureTime = 3000;
   conjuring: boolean = false;
+  castAnimStarted: boolean = false;
   castTime: number = 0;
 
   constructor(caster: ModuleObject, target: ModuleObject, spell: TalentSpell){
@@ -55,6 +59,15 @@ export class SpellCastInstance {
     this.owner = caster;
     this.target = target;
     this.spell = spell;
+
+    // The impactscript resolves its AoE / shape center via GetSpellTargetLocation (#222), which
+    // returns this.talent.oTarget's location and FALLS BACK to world origin (0,0,0) when oTarget
+    // isn't a valid object. In the UI cast path the talent reaching impact() can arrive with
+    // oTarget unset, so GetFirstObjectInShape searches around the origin and finds nothing — no
+    // damage AND no beam VFX get applied. Pin oTarget to this cast's actual target.
+    if(spell && target){
+      spell.oTarget = target;
+    }
 
     //Seed the per-cast fields off the spells.2da row. Without this the impactscript
     //is undefined -> impact() runs Load(undefined) (a no-op) and the spell deals no
@@ -126,6 +139,26 @@ export class SpellCastInstance {
     }else if(this.castTime > 0){
       this.conjuring = false;
 
+      // Entering the CAST phase: switch from the one-shot conjure wind-up to the LOOPING
+      // channel/hold pose (castoutlp*, driven by castanim). Play it ONCE. The CASTOUT1 index
+      // sentinel keeps it from being clobbered by the combat-ready / turning state machines
+      // (see ActionCastSpell.update). The clip is selected by name (updateAnimationState
+      // reads animationState.animation, not .index).
+      if(!this.castAnimStarted){
+        this.castAnimStarted = true;
+        if(this.owner && BitWise.InstanceOfObject(this.owner, ModuleObjectType.ModuleCreature)){
+          const creature: any = this.owner;
+          const castName = this.spell.getCastingAnimation();
+          if(castName){
+            const castAnim = OdysseyModelAnimation.GetAnimation2DA(castName);
+            if(castAnim){
+              creature.playTwoDAAnimation(castAnim);
+              creature.animationState.index = ModuleCreatureAnimState.CASTOUT1;
+            }
+          }
+        }
+      }
+
       this.castTimeProgress = this.castTime / (this.spell.getCastTime() * 0.5);
       if(this.castTimeProgress > 1){
         this.castTimeProgress = 1;
@@ -156,8 +189,24 @@ export class SpellCastInstance {
       //never reach impact() unless range=='L').
       this.impact();
 
-      //I guess the spell is over now
-      this.completed = true;
+      if(!this.completed){
+        //I guess the spell is over now
+        this.completed = true;
+
+        // Cast finished: stop the looping channel pose and hand the caster back to the
+        // combat/idle state machine (the loop never ends on its own). Guarded by the
+        // CASTOUT1 sentinel so we only reset if we're still showing our own cast pose
+        // (don't stomp a newer state). Runs once — the area disposes the instance after
+        // this frame (ModuleArea.update).
+        if(this.owner && BitWise.InstanceOfObject(this.owner, ModuleObjectType.ModuleCreature)){
+          const creature: any = this.owner;
+          if(creature.animationState.index === ModuleCreatureAnimState.CASTOUT1){
+            creature.setAnimationState(
+              creature.combatData.combatState ? ModuleCreatureAnimState.READY : ModuleCreatureAnimState.PAUSE
+            );
+          }
+        }
+      }
     }
 
     if(this.casthandmodel){
@@ -173,7 +222,21 @@ export class SpellCastInstance {
     //We only want to run the impact script once
     if(this.impacted) return;
     this.impacted = true;
-    
+
+    // NOTE: the caster's body animation is NOT (re)played here. The conjure wind-up
+    // (ActionCastSpell.update) and the looping channel pose (this.update's cast phase) own
+    // the cast animation; update()'s completion branch returns the caster to ready/idle.
+    // impact() only fires the impactscript + the hand VFX model.
+
+    // k_sp1_generic (and friends) resolve their target + AoE shape-center via
+    // GetSpellTargetObject() (= caller.combatData.lastSpellTarget) -> GetLocation(oTarget).
+    // beginCombatRound clears lastSpellTarget at round start, so by impact time it is undefined
+    // and GetLocation returns WORLD ORIGIN -> GetFirstObjectInShape finds nobody, so neither the
+    // damage NOR the beam VFX get applied. Restore the caster's last spell target for the script.
+    if(this.owner && this.target && (this.owner as any).combatData){
+      (this.owner as any).combatData.lastSpellTarget = this.target;
+    }
+
     if(this.impactscript){
       console.log('Casting spell', this.impactscript, this);
       const instance = GameState.NWScript.Load(this.impactscript);

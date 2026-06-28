@@ -221,6 +221,13 @@ export class CombatAttackData {
         this.damageList[DamageType.BASE].addDamage(specBonus * damageMultiplier);
       }
 
+      // EffectDamageIncrease/Decrease (Force buffs, item/feat weapon-damage bonuses). Flat bonus
+      // (DAMAGE_BONUS_n = n), crit-multiplied like the other weapon-damage bonuses.
+      const effectDamageBonus = creature.getDamageEffectBonus();
+      if(effectDamageBonus){
+        this.damageList[DamageType.BASE].addDamage(effectDamageBonus * damageMultiplier);
+      }
+
     }else{
       this.damageList[this.attackWeapon.getBaseDamageType()].addDamage(this.attackWeapon.getMonsterDamage() * damageMultiplier);
       if(this.attackWeapon.hasDamageBonus()){

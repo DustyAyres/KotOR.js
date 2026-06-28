@@ -2469,8 +2469,10 @@ export class ModuleObject {
   fortitudeSave(nDC = 0, nSaveType = 0, oVersus: any = undefined){
     let roll = Dice.roll(1, DiceType.d20);
     let bonus = CombatRound.GetMod(this.getCON());
-    
-    if((roll + this.getFortitudeSave() + bonus) >= nDC){
+
+    // EffectSavingThrowIncrease/Decrease (Force Valor/curse/affliction). getCON() already folds in
+    // EffectAbilityIncrease, so ability buffs cascade through `bonus` automatically.
+    if((roll + this.getFortitudeSave() + bonus + this.getSavingThrowEffectBonus(1)) >= nDC){
       return 1
     }
 
@@ -2495,8 +2497,8 @@ export class ModuleObject {
   reflexSave(nDC = 0, nSaveType = 0, oVersus: any = undefined){
     let roll = Dice.roll(1, DiceType.d20);
     let bonus = CombatRound.GetMod(this.getDEX());
-    
-    if((roll + this.getReflexSave() + bonus) >= nDC){
+
+    if((roll + this.getReflexSave() + bonus + this.getSavingThrowEffectBonus(2)) >= nDC){
       return 1
     }
 
@@ -2530,7 +2532,7 @@ export class ModuleObject {
     let roll = Dice.roll(1, DiceType.d20);
     let bonus = CombatRound.GetMod(this.getWIS());
 
-    if((roll + this.getWillSave() + bonus) >= nDC){
+    if((roll + this.getWillSave() + bonus + this.getSavingThrowEffectBonus(3)) >= nDC){
       return 1
     }
 
@@ -2637,11 +2639,78 @@ export class ModuleObject {
 
   /**
    * Check if the object has an effect by type
-   * @param type 
-   * @returns 
+   * @param type
+   * @returns
    */
   hasEffect(type = -1){
     return this.getEffect(type) ? true : false;
+  }
+
+  /**
+   * Sum the integer at `valueIndex` across all ACTIVE effects of `effectType`, optionally only
+   * those whose `filterIndex` int equals `filterValue`. This is the single place the combat getters
+   * read stat-buff effects (Ability/AC/Attack/Damage/Skill Increase/Decrease) so Force Valor /
+   * Armor / Aura / Resist powers and buff feats — which APPLY an effect but were previously inert —
+   * actually move the combat math. intList layouts confirmed from the NWScript Effect* routines.
+   */
+  getEffectIntSum(effectType: GameEffectType, valueIndex: number, filterIndex = -1, filterValue = 0): number {
+    let total = 0;
+    for(let i = 0; i < this.effects.length; i++){
+      const e = this.effects[i];
+      if(!e || e.type != effectType) continue;
+      if(filterIndex >= 0 && e.getInt(filterIndex) != filterValue) continue;
+      total += (e.getInt(valueIndex) || 0);
+    }
+    return total;
+  }
+
+  /** Net ability modifier from EffectAbilityIncrease/Decrease for one ABILITY_* constant (int[0]=ability, int[1]=amount). */
+  getAbilityEffectBonus(ability: number): number {
+    return this.getEffectIntSum(GameEffectType.EffectAbilityIncrease, 1, 0, ability)
+         - this.getEffectIntSum(GameEffectType.EffectAbilityDecrease, 1, 0, ability);
+  }
+
+  /** Net AC bonus from EffectACIncrease/Decrease (int[1]=amount). */
+  getACEffectBonus(): number {
+    return this.getEffectIntSum(GameEffectType.EffectACIncrease, 1)
+         - this.getEffectIntSum(GameEffectType.EffectACDecrease, 1);
+  }
+
+  /** Net attack (to-hit) bonus from EffectAttackIncrease/Decrease (int[0]=amount). */
+  getAttackEffectBonus(): number {
+    return this.getEffectIntSum(GameEffectType.EffectAttackIncrease, 0)
+         - this.getEffectIntSum(GameEffectType.EffectAttackDecrease, 0);
+  }
+
+  /** Net flat weapon-damage bonus from EffectDamageIncrease/Decrease (int[0]=bonus, treated as flat DAMAGE_BONUS_n). */
+  getDamageEffectBonus(): number {
+    return this.getEffectIntSum(GameEffectType.EffectDamageIncrease, 0)
+         - this.getEffectIntSum(GameEffectType.EffectDamageDecrease, 0);
+  }
+
+  /** Net skill bonus for a skill id from EffectSkillIncrease/Decrease (int[0]=skill, int[1]=amount). */
+  getSkillEffectBonus(skill: number): number {
+    return this.getEffectIntSum(GameEffectType.EffectSkillIncrease, 1, 0, skill)
+         - this.getEffectIntSum(GameEffectType.EffectSkillDecrease, 1, 0, skill);
+  }
+
+  /**
+   * Net saving-throw bonus for SAVING_THROW_* `which` (1=FORT,2=REFLEX,3=WILL) from
+   * EffectSavingThrow Increase/Decrease (int[0]=amount, int[1]=which). A buff with int[1]=0
+   * (SAVING_THROW_ALL) applies to every save; a specific buff only its own save.
+   */
+  getSavingThrowEffectBonus(which: number): number {
+    const sum = (effectType: GameEffectType) => {
+      let total = 0;
+      for(let i = 0; i < this.effects.length; i++){
+        const e = this.effects[i];
+        if(!e || e.type != effectType) continue;
+        const w = e.getInt(1);
+        if(w == 0 || w == which) total += (e.getInt(0) || 0);
+      }
+      return total;
+    };
+    return sum(GameEffectType.EffectSavingThrowIncrease) - sum(GameEffectType.EffectSavingThrowDecrease);
   }
 
   /**
