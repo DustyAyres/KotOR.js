@@ -347,6 +347,14 @@ export class MenuPartySelection extends K1_MenuPartySelection {
    */
   updateSelection() {
     super.updateSelection();
+
+    // Nothing selected — clear the info panel.
+    if (this.selectedNPC < 0) {
+      this.LBL_NPC_NAME?.setText('');
+      this.LBL_NPC_LEVEL?.setText('');
+      return;
+    }
+
     if (!(this.char instanceof ModuleCreature) || this.char instanceof ModuleCreature && this.char.selectedNPC != this.selectedNPC) {
       GameState.PartyManager.LoadPartyMemberCreature(this.selectedNPC, (creature: ModuleCreature) => {
         if (creature instanceof ModuleCreature) {
@@ -358,10 +366,28 @@ export class MenuPartySelection extends K1_MenuPartySelection {
           creature.position.set(0, 0, 0);
           creature.model.rotation.z = -Math.PI / 2;
           this.LBL_3D_VIEW.group.creatures.add(creature.model);
-          this.char.LoadModel();
+          // NOTE: LoadPartyMemberCreature already awaits loadModel() before invoking this
+          // callback, so creature.model is ready. The previous call here was
+          // `this.char.LoadModel()` (wrong casing — no such method) which threw every time a
+          // companion was selected.
+          this.updateNPCInfo(creature);
         }
       });
+    } else if (this.char instanceof ModuleCreature) {
+      // Already-loaded selection (e.g. re-selecting the same NPC) — refresh the info panel.
+      this.updateNPCInfo(this.char);
     }
+  }
+
+  /**
+   * Populate the selected companion's name/level info panel. Neither the K1 base nor the
+   * TSL gui code set these (they're TSL-only controls), so a selected companion showed no
+   * name or level at all.
+   */
+  updateNPCInfo(creature: ModuleCreature) {
+    this.LBL_NPC_NAME?.setText(creature.getName());
+    const level = creature.getTotalClassLevel ? creature.getTotalClassLevel() : 0;
+    this.LBL_NPC_LEVEL?.setText(String(level));
   }
   
 }
