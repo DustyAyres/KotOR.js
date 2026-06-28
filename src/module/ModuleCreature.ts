@@ -1023,6 +1023,48 @@ export class ModuleCreature extends ModuleObject {
         this.setAnimationState(ModuleCreatureAnimState.PAUSE);
       }
     }
+
+    // Enemy combat initiation. The scripted AI (k_def_percept01 / k_def_heartbt01)
+    // doesn't reliably start combat against an already-perceived hostile — onNotice
+    // only fires on the not-seen->seen transition, so a creature that already has the
+    // target in its perception list (after a load, or perceived while idle) just
+    // stands there. Mirror the engine AI (which continuously engages perceived
+    // hostiles via DetermineCombatRound): an uncontrolled, non-party creature that
+    // perceives a living hostile and is idle engages the nearest one. Gated so it
+    // only fires while idle (no in-flight round or queued attack), so it both starts
+    // and sustains combat without spamming.
+    if(GameState.getCurrentPlayer() != this &&
+       GameState.PartyManager.party.indexOf(this as any) == -1 &&
+       !this.isDead() &&
+       !this.combatRound.action &&
+       !this.combatRound.scheduledActionList.length &&
+       !this.actionQueue.some((a: any) => a && a.type == ActionType.ActionPhysicalAttacks)){
+      const hostile = this.getNearestPerceivedHostile();
+      if(hostile){
+        this.attackCreature(hostile, undefined);
+      }
+    }
+  }
+
+  /**
+   * The nearest living, hostile creature this creature currently SEES (perception
+   * flag 0x01), or undefined. Used to drive enemy combat initiation.
+   */
+  getNearestPerceivedHostile(): ModuleCreature | undefined {
+    let nearest: ModuleCreature | undefined;
+    let nearestDist = Infinity;
+    for(let i = 0; i < this.perceptionList.length; i++){
+      const info = this.perceptionList[i];
+      const cre = info?.object as any;
+      if(!cre || cre === this) continue;
+      if(!(info.data & 0x01)) continue;         // SEEN (not merely heard)
+      if(!cre.combatData) continue;             // creatures/players only (duck-type; matches ModulePlayer)
+      if(typeof cre.isDead !== 'function' || cre.isDead()) continue;
+      if(!this.isHostile(cre)) continue;
+      const dist = this.position.distanceTo(cre.position);
+      if(dist < nearestDist){ nearestDist = dist; nearest = cre; }
+    }
+    return nearest;
   }
 
   updateCasting(delta = 0){
