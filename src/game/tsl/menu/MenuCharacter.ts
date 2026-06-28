@@ -103,11 +103,13 @@ export class MenuCharacter extends K1_MenuCharacter {
       // fresh character appeared to have a level-up available when they didn't. Hide it by
       // default and only show it (via updateCharacterStats) when the character can level up.
       this.BTN_LEVELUP?.hide();
+      // "Level Up" opens the manual level-up wizard (vs. BTN_AUTO = auto-allocate). The wizard
+      // opens on top; when it closes this screen re-shows and updateCharacterStats refreshes.
       this.BTN_LEVELUP?.addEventListener('click', (e) => {
         e.stopPropagation();
-        if(GameState.getCurrentPlayer().canLevelUp()){
-          GameState.getCurrentPlayer().autoLevelUp();
-          this.updateCharacterStats(GameState.getCurrentPlayer());
+        const pc = GameState.getCurrentPlayer();
+        if(pc.canLevelUp()){
+          (GameState.MenuManager.MenuLevelUp as any).startLevelUp(pc);
         }
       });
 

@@ -308,6 +308,9 @@ export class CharGenAbilities extends GameMenu {
   }
 
   getAttributeCost(index = 0){
+    // Level-up grants a single ability point that raises one score by 1 (flat cost), unlike
+    // chargen's point-buy where higher scores cost more (swkotor2.exe ability step).
+    if(GameState.CharGenManager.levelUpMode) return 1;
     let mod = 0;
     switch(index){
       case CharGenAttribute.STR:

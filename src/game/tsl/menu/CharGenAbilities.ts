@@ -86,7 +86,7 @@ export class CharGenAbilities extends K1_CharGenAbilities {
           this.creature.cha = GameState.CharGenManager.cha;
         }
 
-        this.manager.CharGenMain.updateAttributes();
+        this.manager.CharGenMain?.updateAttributes(); // CharGenMain isn't loaded during level-up
 
         this.close();
       });

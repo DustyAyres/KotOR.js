@@ -171,6 +171,7 @@ export class MenuLevelUp extends K1_MenuLevelUp {
 
   show() {
     super.show();
+    this.recalculatePosition();
     this.updateStepPanel();
   }
 
@@ -219,9 +220,17 @@ export class MenuLevelUp extends K1_MenuLevelUp {
   }
 
   openAttributesStep(){
-    // Wired in a later slice (+1 ability picker). Placeholder: mark done.
+    const cg = GameState.CharGenManager;
+    const c: any = this.creature;
+    cg.levelUpMode = true;
+    cg.selectedCreature = c;
+    // Seed the point-buy working state from the creature's CURRENT base scores; grant exactly
+    // one ability point (flat cost in level-up mode), so the player raises one score by 1.
+    cg.str = c.str; cg.dex = c.dex; cg.con = c.con; cg.wis = c.wis; cg.int = c.int; cg.cha = c.cha;
+    cg.availPoints = 1;
+    this.manager.CharGenAbilities.setCreature(c);
     this.done.attributes = true;
-    this.updateStepPanel();
+    this.manager.CharGenAbilities.open();
   }
 
   openPowersStep(){
