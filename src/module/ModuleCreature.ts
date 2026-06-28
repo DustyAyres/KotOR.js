@@ -3104,23 +3104,29 @@ export class ModuleCreature extends ModuleObject {
         }
       }
 
-      // HP gain = class hit die + CON modifier (floored). getHP() reconstructs current HP as
-      // (maxHitPoints + currentHitPoints) - hitPoints (verified against swkotor2.exe), so
-      // raising only maxHitPoints lifts current HP by exactly the gain. The old code also did
-      // `currentHitPoints = 0`, which collapsed current HP on every level-up (e.g. 70/100 -> 10/110).
-      const conMod = Math.floor((this.getCON() - 10) / 2);
-      this.maxHitPoints += mainClass.hitdie + conMod;
+      this.applyLevelHPFP(mainClass);
+    }
+  }
 
-      // Force Points: Force-using classes gain max(1, forcedie + WIS mod) per level
-      // (swkotor2.exe GetMaxForcePoints). Non-Force classes (forcedie 0) gain nothing.
-      const forcedie = (mainClass as any).forcedie || 0;
-      if(forcedie){
-        const wisMod = Math.floor((this.getWIS() - 10) / 2);
-        const fpGain = Math.max(1, forcedie + wisMod);
-        this.maxForcePoints += fpGain;
-        this.forcePoints += fpGain;
-      }
+  /**
+   * Apply the HP/FP gains for one level of `levelClass`. Matches swkotor2.exe (FUN_006bedf0):
+   * HP per level = the FULL class hit die (no roll); base HitPoints rises by the hit die and
+   * max HP additionally gains the per-level CON modifier. Force classes gain
+   * max(1, forcedie + WIS mod) of MAX Force Points. The engine does NOT heal on level-up — it
+   * never writes current HP/FP — so we leave current HP (currentHitPoints) and current FP
+   * (forcePoints) untouched; only the maxima rise. getHP() = (maxHitPoints + currentHitPoints)
+   * - hitPoints, so raising hitPoints and maxHitPoints together keeps current HP fixed.
+   */
+  applyLevelHPFP(levelClass: any){
+    if(!levelClass) return;
+    const conMod = Math.floor((this.getCON() - 10) / 2);
+    this.hitPoints += levelClass.hitdie;
+    this.maxHitPoints += levelClass.hitdie + conMod;
 
+    const forcedie = levelClass.forcedie || 0;
+    if(forcedie){
+      const wisMod = Math.floor((this.getWIS() - 10) / 2);
+      this.maxForcePoints += Math.max(1, forcedie + wisMod);
     }
   }
 
