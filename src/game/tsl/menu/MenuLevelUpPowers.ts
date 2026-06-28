@@ -113,9 +113,16 @@ export class MenuLevelUpPowers extends GameMenu {
     }
     // GUISpellItem renders an array (a power chain); we surface each power as a single entry.
     this.LB_POWERS.setItems(list.map(r => [r]));
-    // The item widgets enqueue their button-background + power-icon textures; flush the queue
-    // so they actually load (otherwise the icons render as blank white squares).
-    TextureLoader.LoadQueue();
+    // The item widgets enqueue their button-background + power-icon textures asynchronously.
+    // The listbox renders its offscreen (RTT) texture once on setItems — BEFORE those load —
+    // and doesn't refresh, so icons appear as blank white squares. Flush the queue, then mark
+    // the list dirty and re-render so the loaded icons actually show.
+    TextureLoader.LoadQueue().then(() => {
+      try {
+        (this.LB_POWERS as any).markListRttDirty?.();
+        (this.LB_POWERS as any).render?.();
+      } catch (e) { /* list may have closed */ }
+    });
   }
 
   /** True if the power has no unmet prerequisite powers (so upgrades only appear once you own
