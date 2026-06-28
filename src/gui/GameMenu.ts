@@ -230,6 +230,9 @@ export class GameMenu {
     // if(!this.isOverlayGUI){
     //   GameState.RestoreEnginePlayMode();
     // }
+    // Notify listeners (e.g. a parent panel that opened this menu as a sub-step and needs to
+    // re-show itself once this one closes). No-op when nothing is registered.
+    this.triggerEventListener('close');
   }
 
   open(){

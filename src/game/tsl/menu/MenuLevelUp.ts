@@ -1,5 +1,5 @@
 import { GameState } from "@/GameState";
-import type { GUIButton, GUIControl, GUILabel } from "@/gui";
+import type { GameMenu, GUIButton, GUIControl, GUILabel } from "@/gui";
 import type { ModuleCreature } from "@/module";
 import { MenuLevelUp as K1_MenuLevelUp } from "@/game/kotor/KOTOR";
 import { MenuLevelUpPowers } from "@/game/tsl/menu/MenuLevelUpPowers";
@@ -62,7 +62,12 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     super();
     this.gui_resref = 'leveluppnl_p';
     this.background = '';
-    this.voidFill = true;
+    // The retail level-up panel (leveluppnl_p) is a small step list that overlays the
+    // character sheet (character_p) — the 3D character, stats and alignment stay visible
+    // behind it. Render it as a modal overlay (no void backdrop) so MenuCharacter, which is
+    // the menu we were opened from, keeps drawing underneath instead of a black void.
+    this.voidFill = false;
+    this.isOverlayGUI = true;
   }
 
   async menuControlInitializer(skipInit: boolean = false) {
@@ -130,6 +135,11 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     GameState.CharGenManager.levelUpMode = true;
     GameState.CharGenManager.selectedCreature = creature as any;
 
+    // The wizard is a modal overlay that draws over the character sheet; make sure that
+    // backdrop is up (it normally is — the Level Up button lives on it) before opening.
+    if(this.manager.MenuCharacter && !this.manager.MenuCharacter.bVisible){
+      this.manager.MenuCharacter.open();
+    }
     this.open();
   }
 
@@ -236,6 +246,34 @@ export class MenuLevelUp extends K1_MenuLevelUp {
 
   // ---- Steps -------------------------------------------------------------
 
+  /**
+   * Open one of the CharGen sub-panels (Skills/Feats/Abilities/Powers) as the active step.
+   *
+   * The wizard itself is a modal overlay sitting in `activeModals` on top of the character
+   * sheet. A sub-panel is a normal full-screen menu, so while it is up the wizard's step list
+   * must get out of the way: a hidden-but-still-listed modal would both bleed through visually
+   * and (because click hit-testing short-circuits on any present modal) swallow the sub-panel's
+   * input. So we detach the wizard from the modal stack and hide it, then re-attach it when the
+   * sub-panel closes (via the one-shot `close` listener).
+   */
+  private openSubStepMenu(menu: GameMenu){
+    if(!menu) return;
+    const onClose = () => {
+      menu.removeEventListener('close', onClose);
+      this.returnFromSubStep();
+    };
+    menu.addEventListener('close', onClose);
+    this.manager.Remove(this);
+    this.hide();
+    menu.open();
+  }
+
+  /** Re-show the wizard panel (and refresh its step list) after a sub-step closes. The sub-menu's
+   * close already re-showed the MenuCharacter backdrop, so we just re-open on top of it. */
+  private returnFromSubStep(){
+    this.open();
+  }
+
   openSkillsStep(){
     const cg = GameState.CharGenManager;
     cg.levelUpMode = true;
@@ -244,7 +282,7 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     cg.resetSkillPoints();
     cg.availSkillPoints = cg.getMaxSkillPoints();
     this.done.skills = true; // visiting the step satisfies it (0 leftover points is allowed)
-    this.manager.CharGenSkills.open();
+    this.openSubStepMenu(this.manager.CharGenSkills);
   }
 
   openFeatsStep(){
@@ -254,7 +292,7 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     // CharGenFeats.show() reads featGainPoints[newLevel-1] for the selectable count, auto-grants
     // this level's class feats, and adds picks to the creature — exactly what level-up needs.
     this.done.feats = true;
-    this.manager.CharGenFeats.open();
+    this.openSubStepMenu(this.manager.CharGenFeats);
   }
 
   openAttributesStep(){
@@ -268,14 +306,14 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     cg.availPoints = 1;
     this.manager.CharGenAbilities.setCreature(c);
     this.done.attributes = true;
-    this.manager.CharGenAbilities.open();
+    this.openSubStepMenu(this.manager.CharGenAbilities);
   }
 
   openPowersStep(){
     if(!this.powersMenu){ this.done.powers = true; this.updateStepPanel(); return; }
     this.powersMenu.setup(this.creature, this.levelClassIndex, this.getPowerGrantCount());
     this.done.powers = true;
-    this.powersMenu.open();
+    this.openSubStepMenu(this.powersMenu);
   }
 
   // ---- Commit / cancel ---------------------------------------------------
@@ -291,6 +329,9 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     this.snapshot = null;
     GameState.CharGenManager.levelUpMode = false;
     this.close();
+    // Closing a modal doesn't re-show the menu beneath it, so refresh the character sheet
+    // backdrop explicitly — its stats/level (and the Level Up button gate) need to update.
+    this.manager.MenuCharacter?.show();
   }
 
   /** Abort the level-up and restore the creature to its pre-wizard state. */
@@ -298,6 +339,7 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     this.restoreSnapshot();
     GameState.CharGenManager.levelUpMode = false;
     this.close();
+    this.manager.MenuCharacter?.show();
   }
 
   private captureSnapshot(){
