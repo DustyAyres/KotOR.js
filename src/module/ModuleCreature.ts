@@ -3104,8 +3104,22 @@ export class ModuleCreature extends ModuleObject {
         }
       }
 
-      this.maxHitPoints += mainClass.hitdie + ( (this.getCON() - 10) /2 );
-      this.currentHitPoints = 0;
+      // HP gain = class hit die + CON modifier (floored). getHP() reconstructs current HP as
+      // (maxHitPoints + currentHitPoints) - hitPoints (verified against swkotor2.exe), so
+      // raising only maxHitPoints lifts current HP by exactly the gain. The old code also did
+      // `currentHitPoints = 0`, which collapsed current HP on every level-up (e.g. 70/100 -> 10/110).
+      const conMod = Math.floor((this.getCON() - 10) / 2);
+      this.maxHitPoints += mainClass.hitdie + conMod;
+
+      // Force Points: Force-using classes gain max(1, forcedie + WIS mod) per level
+      // (swkotor2.exe GetMaxForcePoints). Non-Force classes (forcedie 0) gain nothing.
+      const forcedie = (mainClass as any).forcedie || 0;
+      if(forcedie){
+        const wisMod = Math.floor((this.getWIS() - 10) / 2);
+        const fpGain = Math.max(1, forcedie + wisMod);
+        this.maxForcePoints += fpGain;
+        this.forcePoints += fpGain;
+      }
 
     }
   }

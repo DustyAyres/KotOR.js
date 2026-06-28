@@ -99,6 +99,18 @@ export class MenuCharacter extends K1_MenuCharacter {
       });
       this._button_y = this.BTN_AUTO;
 
+      // The "Level Up" button was always visible (the .gui default) and never wired, so a
+      // fresh character appeared to have a level-up available when they didn't. Hide it by
+      // default and only show it (via updateCharacterStats) when the character can level up.
+      this.BTN_LEVELUP?.hide();
+      this.BTN_LEVELUP?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if(GameState.getCurrentPlayer().canLevelUp()){
+          GameState.getCurrentPlayer().autoLevelUp();
+          this.updateCharacterStats(GameState.getCurrentPlayer());
+        }
+      });
+
       this.BTN_CHANGE1?.addEventListener('click', (e) => {
         e.stopPropagation();
         if (GameState.PartyManager.party.length > 1) {
@@ -179,6 +191,18 @@ export class MenuCharacter extends K1_MenuCharacter {
       this._3dView.render(delta);
       (this.LBL_3DCHAR.getFill().material as any).needsUpdate = true;
     } catch (e: any) { }
+  }
+
+  updateCharacterStats(character: any) {
+    super.updateCharacterStats(character);
+    // Show the manual "Level Up" button only when the character can actually level up
+    // (mirrors BTN_AUTO, which the base toggles). Otherwise a fresh, no-XP character shows
+    // a level-up option that isn't allowed.
+    if (character && typeof character.canLevelUp === 'function' && character.canLevelUp()) {
+      this.BTN_LEVELUP?.show();
+    } else {
+      this.BTN_LEVELUP?.hide();
+    }
   }
 
   show() {
