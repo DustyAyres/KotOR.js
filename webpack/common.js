@@ -3,6 +3,7 @@ const webpack = require('webpack');
 const WebpackBar = require('webpackbar');
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const ReactRefreshWebpackPlugin = require('@pmmmwh/react-refresh-webpack-plugin');
+const { attachGameDataMiddleware } = require('./gamedata-middleware');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -139,6 +140,12 @@ function makeDevServer() {
       path.resolve(ROOT, 'dist/bink-worker.js'),
       path.resolve(ROOT, 'dist/server.js'),
     ],
+    // WEB_TEST headless harness: expose the user's installed game dir over HTTP
+    // so the browser build can read game data without the directory picker.
+    setupMiddlewares: (middlewares, devServer) => {
+      attachGameDataMiddleware(devServer);
+      return middlewares;
+    },
   };
 }
 

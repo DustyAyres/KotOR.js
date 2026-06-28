@@ -170,7 +170,7 @@ export class CharGenAbilities extends K1_CharGenAbilities {
       //PLUS Buttons
       this.STR_PLUS_BTN.addEventListener('click', (e) => {
         e.stopPropagation();
-        if(this.creature && this.getAttributeCost(CharGenAttribute.STR) <= GameState.CharGenManager.availPoints){
+        if(this.creature && GameState.CharGenManager.str < 18 && this.getAttributeCost(CharGenAttribute.STR) <= GameState.CharGenManager.availPoints){
           GameState.CharGenManager.str += 1;
           let cost = this.getAttributeCost(CharGenAttribute.STR);
           GameState.CharGenManager.availPoints -= cost;
@@ -180,7 +180,7 @@ export class CharGenAbilities extends K1_CharGenAbilities {
 
       this.DEX_PLUS_BTN.addEventListener('click', (e) => {
         e.stopPropagation();
-        if(this.creature && this.getAttributeCost(CharGenAttribute.DEX) <= GameState.CharGenManager.availPoints){
+        if(this.creature && GameState.CharGenManager.dex < 18 && this.getAttributeCost(CharGenAttribute.DEX) <= GameState.CharGenManager.availPoints){
           GameState.CharGenManager.dex += 1;
           let cost = this.getAttributeCost(CharGenAttribute.DEX);
           GameState.CharGenManager.availPoints -= cost;
@@ -190,7 +190,7 @@ export class CharGenAbilities extends K1_CharGenAbilities {
 
       this.CON_PLUS_BTN.addEventListener('click', (e) => {
         e.stopPropagation();
-        if(this.creature && this.getAttributeCost(CharGenAttribute.CON) <= GameState.CharGenManager.availPoints){
+        if(this.creature && GameState.CharGenManager.con < 18 && this.getAttributeCost(CharGenAttribute.CON) <= GameState.CharGenManager.availPoints){
           GameState.CharGenManager.con += 1;
           let cost = this.getAttributeCost(CharGenAttribute.CON);
           GameState.CharGenManager.availPoints -= cost;
@@ -200,7 +200,7 @@ export class CharGenAbilities extends K1_CharGenAbilities {
 
       this.WIS_PLUS_BTN.addEventListener('click', (e) => {
         e.stopPropagation();
-        if(this.creature && this.getAttributeCost(CharGenAttribute.WIS) <= GameState.CharGenManager.availPoints){
+        if(this.creature && GameState.CharGenManager.wis < 18 && this.getAttributeCost(CharGenAttribute.WIS) <= GameState.CharGenManager.availPoints){
           GameState.CharGenManager.wis += 1;
           let cost = this.getAttributeCost(CharGenAttribute.WIS);
           GameState.CharGenManager.availPoints -= cost;
@@ -210,7 +210,7 @@ export class CharGenAbilities extends K1_CharGenAbilities {
 
       this.INT_PLUS_BTN.addEventListener('click', (e) => {
         e.stopPropagation();
-        if(this.creature && this.getAttributeCost(CharGenAttribute.INT) <= GameState.CharGenManager.availPoints){
+        if(this.creature && GameState.CharGenManager.int < 18 && this.getAttributeCost(CharGenAttribute.INT) <= GameState.CharGenManager.availPoints){
           GameState.CharGenManager.int += 1;
           let cost = this.getAttributeCost(CharGenAttribute.INT);
           GameState.CharGenManager.availPoints -= cost;
@@ -220,7 +220,7 @@ export class CharGenAbilities extends K1_CharGenAbilities {
 
       this.CHA_PLUS_BTN.addEventListener('click', (e) => {
         e.stopPropagation();
-        if(this.creature && this.getAttributeCost(CharGenAttribute.CHA) <= GameState.CharGenManager.availPoints){
+        if(this.creature && GameState.CharGenManager.cha < 18 && this.getAttributeCost(CharGenAttribute.CHA) <= GameState.CharGenManager.availPoints){
           GameState.CharGenManager.cha += 1;
           let cost = this.getAttributeCost(CharGenAttribute.CHA);
           GameState.CharGenManager.availPoints -= cost;

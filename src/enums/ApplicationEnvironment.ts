@@ -11,4 +11,7 @@
 export enum ApplicationEnvironment {
   BROWSER = "BROWSER",
   ELECTRON = "ELECTRON",
+  // Headless test mode: read game data over HTTP from the dev server instead of
+  // the File System Access API, so the browser build can be driven automatically.
+  WEB_TEST = "WEB_TEST",
 }

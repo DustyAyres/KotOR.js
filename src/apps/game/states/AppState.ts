@@ -14,6 +14,20 @@ export class AppState {
   static statsMode: number|undefined = undefined;
 
   /**
+   * isWebTest
+   * Headless harness mode: navigate to /game/?key=tsl&test=1 to boot the game
+   * reading data over HTTP from the dev server (ApplicationEnvironment.WEB_TEST)
+   * instead of the File System Access directory picker. See GameFileSystem.ts
+   * and webpack/gamedata-middleware.js.
+   */
+  static isWebTest(): boolean {
+    if(typeof window === 'undefined') return false;
+    if(window.location.origin === 'file://') return false;
+    const q = new URLSearchParams(window.location.search);
+    return q.get('test') === '1' || q.get('env') === 'webtest';
+  }
+
+  /**
    * getProfile
    * Seeds Profiles.* from built-in launcher definitions when IndexedDB has never seen the launcher
    * (direct navigation to game.html?key=kotor, etc.).
@@ -26,6 +40,16 @@ export class AppState {
     const validKeys = Object.keys(Launcher.AppProfiles || {});
     const key =
       rawKey && validKeys.includes(rawKey) ? rawKey : "kotor";
+    if(AppState.isWebTest()){
+      // Use the in-memory launcher profile (IndexedDB is empty in a fresh
+      // automated browser). No directory_handle — game data comes over HTTP.
+      const profile = Object.assign(
+        {}, (Launcher.AppProfiles || {})[key] || KotOR.ConfigClient.get(`Profiles.${key}`)
+      );
+      profile.key = key;
+      profile.directory_handle = undefined;
+      return profile;
+    }
     return KotOR.ConfigClient.get(`Profiles.${key}`);
   }
 
@@ -35,6 +59,8 @@ export class AppState {
   static async initApp(){
     if(window.location.origin === 'file://'){
       AppState.env = ApplicationEnvironment.ELECTRON;
+    }else if(AppState.isWebTest()){
+      AppState.env = ApplicationEnvironment.WEB_TEST;
     }else{
       AppState.env = ApplicationEnvironment.BROWSER;
     }
@@ -42,6 +68,12 @@ export class AppState {
     AppState.appProfile = await AppState.getProfile();
     KotOR.ApplicationProfile.SetProfile(AppState.appProfile);
     KotOR.ApplicationProfile.InitEnvironment();
+    if(AppState.env == ApplicationEnvironment.WEB_TEST){
+      // InitEnvironment() resets ENV to BROWSER from window.location; force WEB_TEST back.
+      KotOR.ApplicationProfile.ENV = ApplicationEnvironment.WEB_TEST;
+      // Turn on the engine-side test event bus / deterministic-time hooks (no-op in normal play).
+      KotOR.TestHarness.enabled = true;
+    }
 
     applyProfileSeo(buildProfileSeo(AppState.appProfile, {
       appPath: '/game/',
@@ -65,7 +97,8 @@ export class AppState {
       accepted: false
     }, eulaState[AppState.gameKey]);
     eulaState[AppState.gameKey] = gameEULAConfig;
-    AppState.eulaAccepted = !!gameEULAConfig.accepted;
+    // Headless test mode auto-accepts the EULA so it boots straight into the game.
+    AppState.eulaAccepted = !!gameEULAConfig.accepted || (AppState.env == ApplicationEnvironment.WEB_TEST);
     window.localStorage.setItem('acceptEULA', JSON.stringify(eulaState));
 
     AppState.loaderShow();
@@ -95,7 +128,20 @@ export class AppState {
   static async loadGameDirectory(){
     AppState.loaderShow();
     GameInitializer.SetLoadingMessage('Locating Game Directory...');
-  
+
+    if(AppState.env == ApplicationEnvironment.WEB_TEST){
+      if(await KotOR.GameFileSystem.exists('chitin.key')){
+        AppState.directoryLocated = true;
+        AppState.processEventListener('on-preload', []);
+        AppState.beginGame();
+        return;
+      }
+      console.error('WEB_TEST: chitin.key not found over HTTP. Is the dev-server gamedata middleware pointed at your game install (KOTOR2_DIR)?');
+      AppState.directoryLocated = false;
+      AppState.processEventListener('on-preload', []);
+      return;
+    }
+
     if(AppState.env == ApplicationEnvironment.ELECTRON){
       if(await KotOR.GameFileSystem.exists('chitin.key')){
         AppState.directoryLocated = true;
@@ -125,6 +171,9 @@ export class AppState {
    * - Used for Electron and Browser
    */
   static async checkGameDirectory(){
+    if(AppState.env == ApplicationEnvironment.WEB_TEST){
+      return await KotOR.GameFileSystem.exists('chitin.key');
+    }
     if(AppState.env == ApplicationEnvironment.ELECTRON){
       if(await KotOR.GameFileSystem.exists('chitin.key')){
         return true;
@@ -214,7 +263,75 @@ export class AppState {
     await KotOR.GameState.Init();
     document.body.append(KotOR.GameState.stats.domElement);
     console.log('init complete');
+
+    // WEB_TEST quick-start: ?module=<resref> jumps straight into a level with a
+    // provisioned default PC, skipping chargen and the prologue entirely.
+    if(AppState.env == ApplicationEnvironment.WEB_TEST){
+      (window as any).AppState = AppState; // expose for programmatic harness driving
+      const q = new URLSearchParams(window.location.search);
+      const quickModule = q.get('module');
+      if(quickModule){
+        await AppState.quickStart(quickModule, q.get('waypoint') || '');
+        AppState.loaderHide();
+        return;
+      }
+    }
+
     AppState.loaderHide();
+  }
+
+  /**
+   * quickStart (WEB_TEST harness)
+   * Provision a default player character and jump straight into a module —
+   * skipping character creation and the prologue. Callable from the URL
+   * (?module=101PER[&waypoint=...]) or programmatically: window.AppState.quickStart('101PER').
+   *
+   * NOTE: this does not replay story decisions/journal/globals, so module scripts
+   * that depend on prior plot state may not behave exactly as in a real playthrough
+   * — it is meant for testing areas, combat, and UI, not narrative continuity.
+   */
+  static async quickStart(moduleName: string, waypoint: string = ''){
+    try{
+      const PM = KotOR.GameState.PartyManager;
+      const template = PM.GeneratePlayerTemplate();
+      PM.PlayerTemplate = template;
+      PM.ActualPlayerTemplate = template;
+      // Register the PC's portrait so it lands in the party/HUD correctly.
+      try{
+        const pc = new KotOR.GameState.Module.ModuleArea.ModulePlayer(template);
+        pc.load();
+        PM.AddPortraitToOrder(pc.getPortraitResRef());
+      }catch(e){ console.warn('quickStart: portrait setup skipped', e); }
+
+      KotOR.GameState.GlobalVariableManager.Init();
+      await KotOR.CurrentGame.InitGameInProgressFolder(true);
+      await KotOR.GameState.LoadModule(moduleName, waypoint || undefined as any);
+
+      // Many modules auto-start an OnEnter conversation/cutscene that expects story
+      // state we didn't provision (it renders as a black DIALOG screen). Skip it so
+      // we land in a playable INGAME state. The OnEnter script fires asynchronously
+      // only once gameplay ticks begin (after this returns and the loader hides), so
+      // use a non-blocking watcher that ends any conversation that appears within a
+      // window and re-skips if it retriggers.
+      if(new URLSearchParams(window.location.search).get('keepDialog') !== '1'){
+        let ticks = 0;
+        const skipTimer = setInterval(() => {
+          const cm = KotOR.GameState.CutsceneManager;
+          if(cm && (cm.active || cm.dialog)){
+            try{ cm.endConversation(true); }catch(e){ console.warn('quickStart: endConversation failed', e); }
+          }
+          if(++ticks > 66){ // ~10s
+            clearInterval(skipTimer);
+            if(KotOR.GameState.Mode === KotOR.EngineMode.DIALOG){
+              KotOR.GameState.SetEngineMode(KotOR.EngineMode.INGAME);
+            }
+          }
+        }, 150);
+      }
+      console.log(`quickStart: loaded module ${moduleName}`);
+    }catch(e){
+      console.error(`quickStart: failed to load module ${moduleName}`, e);
+    }
   }
 
   /**

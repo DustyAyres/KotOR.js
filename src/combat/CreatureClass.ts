@@ -120,7 +120,7 @@ export class CreatureClass {
 
   isFeatAvailable( feat: any ){
     if(typeof feat != 'undefined'){
-      let status = parseInt(feat[this.featstable.toLowerCase()+'_list']);
+      let status = parseInt(feat[this.featstable.toLowerCase()+'List']);
       if(isNaN(status)){
         return false;
       }
@@ -134,7 +134,7 @@ export class CreatureClass {
 
   getFeatStatus( feat: any ){
     if(typeof feat != 'undefined'){
-      let status = parseInt(feat[this.featstable.toLowerCase()+'_list']);
+      let status = parseInt(feat[this.featstable.toLowerCase()+'List']);
       if(isNaN(status)){
         return false;
       }
@@ -146,7 +146,7 @@ export class CreatureClass {
 
   getFeatGrantedLevel( feat: any ){
     if(typeof feat != 'undefined'){
-      let granted = parseInt(feat[this.featstable.toLowerCase()+'_granted']);
+      let granted = parseInt(feat[this.featstable.toLowerCase()+'Granted']);
       if(isNaN(granted)){
         return -1;
       }

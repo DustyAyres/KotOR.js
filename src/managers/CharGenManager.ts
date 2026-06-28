@@ -3,7 +3,7 @@ import { AudioLoader } from "@/audio/AudioLoader";
 import { GameEngineType } from "@/enums/engine";
 import { ModuleCreatureArmorSlot } from "@/enums/module/ModuleCreatureArmorSlot";
 import { GFFDataType } from "@/enums/resource/GFFDataType";
-import { CharGenClasses } from "@/game/CharGenClasses";
+import { getCharGenClasses } from "@/game/CharGenClasses";
 import { GameState } from "@/GameState";
 import { LBL_3DView } from "@/gui";
 import type { ModulePlayer } from "@/module/ModulePlayer";
@@ -16,6 +16,7 @@ import { AudioEngine } from "@/audio/AudioEngine";
 import { LTRObject } from "@/resource/LTRObject";
 import { MDLLoader, ResourceLoader } from "@/loaders";
 import { ResourceTypes } from "@/resource/ResourceTypes";
+import { TalentFeat } from "@/talents";
 
 /**
  * CharGenManager class.
@@ -135,30 +136,14 @@ export class CharGenManager {
 
   static GetPlayerTemplate(nth = 0) {
     let template = new GFFObject();
-    let idx = Math.floor(Math.random() * 15);
-    let classId = 0;
-    switch (nth) {
-    case 0:
-      classId = 2;
-      break;
-    case 1:
-      classId = 1;
-      break;
-    case 2:
-      classId = 0;
-      break;
-    case 3:
-      classId = 0;
-      break;
-    case 4:
-      classId = 1;
-      break;
-    case 5:
-      classId = 2;
-      break;
-    }
+    // Class table is game-specific: K1 = Soldier/Scout/Scoundrel, TSL = the three
+    // Jedi classes. The class id and appearance pool both come from the table so
+    // the created PC is the class the slot advertises.
+    const classDef = getCharGenClasses()[nth];
+    let idx = Math.floor(Math.random() * classDef.appearances.length);
+    let classId = classDef.id;
     let portraitId = 0;
-    let appearanceIdx = CharGenClasses[nth].appearances[idx];
+    let appearanceIdx = classDef.appearances[idx];
     const portraits2DA = GameState.SWRuleSet.portraits;
     if(portraits2DA){
       for (let i = 0; i < portraits2DA.length; i++) {
@@ -264,6 +249,105 @@ export class CharGenManager {
 
   
 
+  /**
+   * Ability modifier (d20): floor((score - 10) / 2).
+   */
+  static abilityMod(score: number) {
+    return Math.floor((score - 10) / 2);
+  }
+
+  /**
+   * Compute and store the derived combat stats for a freshly created PC, BEFORE
+   * the template is serialized (save()). The custom-creation path previously left
+   * these as the placeholder template values (Max HP 20, saves 0, FP 0), so a
+   * custom Jedi was cosmetically right but mechanically broken.
+   *
+   * - Max HP   = class hit die + CON modifier (KotOR takes the full hit die at L1,
+   *              it does not roll). Stored on all three HP fields so the creature
+   *              spawns at full health (getHP()/getMaxHP()).
+   * - Saves    = class base save (by level, from cls_st_*) + ability modifier.
+   *              The runtime save roll adds creature.fortitudeSaveThrow directly
+   *              (NOT fortbonus), so the ability modifier must be baked in here.
+   * - Force PP = class force pool (see getMaxForcePoints — formula flagged).
+   *
+   * Defense/AC is intentionally NOT written here: getAC() already derives it
+   * (10 + DEX mod + class AC bonus + armor + effects) and save() serializes
+   * getAC(), so AC is correct without a stored override.
+   */
+  static finalizeDerivedStats(creature: ModulePlayer) {
+    if (!creature) return;
+    const mainClass: any = creature.getMainClass();
+    if (!mainClass) return;
+    const level = creature.getTotalClassLevel() || 1;
+    const mod = CharGenManager.abilityMod;
+
+    // Max HP = hit die + CON modifier (minimum 1).
+    const maxHP = Math.max(1, mainClass.hitdie + mod(creature.getCON()));
+    creature.maxHitPoints = maxHP;
+    creature.currentHitPoints = maxHP;
+    creature.hitPoints = maxHP;
+
+    // Saving throws = class base (by level) + ability modifier. Fort↔CON, Ref↔DEX, Will↔WIS.
+    const st = Array.isArray(mainClass.savingThrows) ? mainClass.savingThrows[level - 1] : null;
+    creature.fortitudeSaveThrow = (st ? st.fortsave : 0) + mod(creature.getCON());
+    creature.reflexSaveThrow    = (st ? st.refsave  : 0) + mod(creature.getDEX());
+    creature.willSaveThrow      = (st ? st.willsave : 0) + mod(creature.getWIS());
+
+    // Force Points.
+    const maxFP = CharGenManager.getMaxForcePoints(creature, mainClass, level);
+    creature.maxForcePoints = maxFP;
+    creature.forcePoints = maxFP;
+
+    // Auto-granted class feats (weapon proficiencies, Power Attack, Force Chain,
+    // Jedi Defense, etc.). The Feats screen grants these when visited, but grant
+    // them here too so a finalized PC always has them even if that step was skipped.
+    CharGenManager.grantAutomaticFeats(creature);
+  }
+
+  /**
+   * Grant the feats a PC of this class receives automatically at creation —
+   * feat.2da <class>_pc_granted == 1 (e.g. jgd_pc_granted): the weapon
+   * proficiencies, Power Attack/Power Blast/etc., Jedi Defense, Force Chain ...
+   *
+   * Note this is the PC-granted column, NOT the K1 status-3 `_granted` mechanism
+   * (which the inherited CharGenFeats.addGrantedFeats uses): for the TSL Jedi
+   * classes no feat has list-status 3, so the inherited path grants them nothing.
+   * Some PC-granted feats (e.g. Force Chain) have list status 4 "unavailable to
+   * pick", so this is intentionally NOT gated on isFeatAvailable. Idempotent.
+   */
+  static grantAutomaticFeats(creature: ModulePlayer) {
+    const mainClass: any = creature.getMainClass();
+    if (!mainClass || !mainClass.featstable) return;
+    const pcGrantedKey = mainClass.featstable.toLowerCase() + 'PcGranted';
+    const feats = GameState.SWRuleSet.feats;
+    const count = GameState.SWRuleSet.featCount;
+    for (let i = 0; i < count; i++) {
+      const feat: any = feats[i];
+      if (!feat || !feat.constant) continue; // skip blank placeholder rows
+      if (parseInt(feat[pcGrantedKey]) === 1 && !creature.getHasFeat(i)) {
+        // Index i is the feat id; new TalentFeat(id) carries it (From2DA does not).
+        creature.addFeat(new TalentFeat(i));
+      }
+    }
+  }
+
+  /**
+   * Level-1 Force Point pool.
+   *
+   * Confirmed from the swkotor2.exe dump (GetMaxForcePoints = FUN_0057eca0): each
+   * Force-class level contributes `max(1, forcedie + WIS_modifier)`, then
+   * BonusForcePoints (GFF) and conditional feat/item bonuses are added. Charisma
+   * is NOT part of the formula (the common "WIS + CHA" guess is refuted by the
+   * binary — only field 0xf6, the Wisdom modifier, feeds the pool). classes.2da
+   * `forcedie` = Guardian 4 / Sentinel 6 / Consular 8. At creation BonusForcePoints
+   * is 0, so L1 FP = max(1, forcedie + WIS mod).
+   */
+  static getMaxForcePoints(creature: ModulePlayer, mainClass: any, _level = 1) {
+    const forcedie = mainClass.forcedie || 0;
+    if (!forcedie) return 0; // non-Force class contributes nothing
+    return Math.max(1, forcedie + CharGenManager.abilityMod(creature.getWIS()));
+  }
+
   static resetSkillPoints() {
     for (let i = 0; i < 8; i++) {
       CharGenManager.selectedCreature.skills[i].rank = 0;
@@ -281,7 +365,34 @@ export class CharGenManager {
   
 
   static getMaxSkillPoints() {
-    return 10 + parseInt(CharGenManager.selectedCreature.classes[0].skillpointbase as any);
+    const cre = CharGenManager.selectedCreature;
+    const base = parseInt(cre.classes[0].skillpointbase as any) || 0;
+    const intMod = CharGenManager.abilityMod(cre.getINT());
+    // d20/KotOR: per-level points = skillpointbase + INT modifier; the FIRST
+    // level grants x4 that amount, with a floor of 4. (Chargen is always L1.)
+    return Math.max(4, (base + intMod) * 4);
+  }
+
+  /**
+   * True if the indexed skill (0..7, matching the SkillList order) is a class
+   * skill for the selected class, per skills.2da's <skillstable>_class flag.
+   */
+  static isClassSkill(skillIndex: number) {
+    const skills2da = GameState.TwoDAManager.datatables.get('skills');
+    const row = skills2da?.rows?.[skillIndex];
+    if (!row) return false;
+    return parseInt(row[CharGenManager.getSkillTableColumn()]) === 1;
+  }
+
+  /** Rank cost: class skill = 1 point/rank, cross-class = 2 points/rank. */
+  static getSkillCost(skillIndex: number) {
+    return CharGenManager.isClassSkill(skillIndex) ? 1 : 2;
+  }
+
+  /** Max rank: class skill = level + 3 (4 @ L1); cross-class = (level+3)/2 (2 @ L1). */
+  static getSkillMaxRank(skillIndex: number) {
+    const level = CharGenManager.selectedCreature?.getTotalClassLevel() || 1;
+    return CharGenManager.isClassSkill(skillIndex) ? (level + 3) : Math.floor((level + 3) / 2);
   }
 
   static getSkillTableColumn() {

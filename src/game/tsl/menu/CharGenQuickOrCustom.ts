@@ -92,9 +92,8 @@ export class CharGenQuickOrCustom extends K1_CharGenQuickOrCustom {
         this.manager.CharGenMain.close();
       });
 
-      //Hide because this submenu is very incomplete.
-      //Comment out this line to work on the custom chargen screen
-      this.CUST_CHAR_BTN.hide();
+      // Custom character creation is now wired up (CharGenCustomPanel step buttons),
+      // so the Custom Character button is shown again.
 
       // this.tGuiPanel.offset.x = -180;
       // this.tGuiPanel.offset.y = 100;

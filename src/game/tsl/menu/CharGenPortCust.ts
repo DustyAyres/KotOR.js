@@ -1,7 +1,7 @@
 import { GameState } from "@/GameState";
 import type { GUILabel, GUIButton } from "@/gui";
 import { OdysseyModel3D } from "@/three/odyssey";
-import { CharGenClasses } from "@/game/CharGenClasses";
+import { getCharGenClasses } from "@/game/CharGenClasses";
 import { CharGenPortCust as K1_CharGenPortCust } from "@/game/kotor/KOTOR";
 
 /**
@@ -54,13 +54,14 @@ export class CharGenPortCust extends K1_CharGenPortCust {
       if(this.isCharLoading) return;
       this.isCharLoading = true;
       const creature = GameState.CharGenManager.selectedCreature;
-    
-      let idx = CharGenClasses[GameState.CharGenManager.selectedClass].appearances.indexOf(creature.appearance);
-      let arrayLength = CharGenClasses[GameState.CharGenManager.selectedClass].appearances.length;
+      const appearances = getCharGenClasses()[GameState.CharGenManager.selectedClass].appearances;
+
+      let idx = appearances.indexOf(creature.appearance);
+      let arrayLength = appearances.length;
       if(idx <= 0){
-        creature.appearance = CharGenClasses[GameState.CharGenManager.selectedClass].appearances[arrayLength - 1];
+        creature.appearance = appearances[arrayLength - 1];
       }else{
-        creature.appearance = CharGenClasses[GameState.CharGenManager.selectedClass].appearances[--idx];
+        creature.appearance = appearances[--idx];
       }
       creature.setAppearance(creature.appearance);
 
@@ -99,13 +100,14 @@ export class CharGenPortCust extends K1_CharGenPortCust {
       if(this.isCharLoading) return;
       this.isCharLoading = true;
       const creature = GameState.CharGenManager.selectedCreature;
+      const appearances = getCharGenClasses()[GameState.CharGenManager.selectedClass].appearances;
 
-      let idx = CharGenClasses[GameState.CharGenManager.selectedClass].appearances.indexOf(creature.appearance);
-      let arrayLength = CharGenClasses[GameState.CharGenManager.selectedClass].appearances.length;
+      let idx = appearances.indexOf(creature.appearance);
+      let arrayLength = appearances.length;
       if(idx >= arrayLength - 1){
-        creature.appearance = CharGenClasses[GameState.CharGenManager.selectedClass].appearances[0];
+        creature.appearance = appearances[0];
       }else{
-        creature.appearance = CharGenClasses[GameState.CharGenManager.selectedClass].appearances[++idx];
+        creature.appearance = appearances[++idx];
       }
       creature.setAppearance(creature.appearance);
 
