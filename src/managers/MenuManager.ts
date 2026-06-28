@@ -401,6 +401,32 @@ export class MenuManager {
     }
   }
 
+  /**
+   * Load only the CharGen sub-panels the manual level-up wizard reuses (Abilities, Skills,
+   * Feats). Unlike LoadCharGenGameMenus this deliberately skips CharGenMain — its 3D preview
+   * init isn't needed for level-up and fails when loaded outside the creation flow.
+   */
+  static async LoadLevelUpGameMenus(){
+    if(MenuManager.CharGenSkills) return;
+    try{
+      if(GameState.GameKey == GameEngineType.KOTOR){
+        [MenuManager.CharGenAbilities, MenuManager.CharGenSkills, MenuManager.CharGenFeats] = await Promise.all([
+          MenuManager.GameMenuLoader(KOTOR.CharGenAbilities),
+          MenuManager.GameMenuLoader(KOTOR.CharGenSkills),
+          MenuManager.GameMenuLoader(KOTOR.CharGenFeats),
+        ]) as any;
+      }else if(GameState.GameKey == GameEngineType.TSL){
+        [MenuManager.CharGenAbilities, MenuManager.CharGenSkills, MenuManager.CharGenFeats] = await Promise.all([
+          MenuManager.GameMenuLoader(TSL.CharGenAbilities),
+          MenuManager.GameMenuLoader(TSL.CharGenSkills),
+          MenuManager.GameMenuLoader(TSL.CharGenFeats),
+        ]) as any;
+      }
+    }catch(e){
+      console.error(e);
+    }
+  }
+
   static #ingameMenusLoaded = false;
   static async LoadInGameMenus(){
     if(MenuManager.#ingameMenusLoaded) return;

@@ -348,18 +348,30 @@ export class CharGenManager {
     return Math.max(1, forcedie + CharGenManager.abilityMod(creature.getWIS()));
   }
 
+  /**
+   * When true, the CharGen skill helpers operate in level-up mode: they keep the creature's
+   * EXISTING skill ranks (instead of zeroing them) and grant only this level's skill points.
+   * Set by the level-up wizard (MenuLevelUp) and cleared when it closes.
+   */
+  static levelUpMode: boolean = false;
+
   static resetSkillPoints() {
     for (let i = 0; i < 8; i++) {
-      CharGenManager.selectedCreature.skills[i].rank = 0;
+      // Level-up keeps current ranks as the floor; chargen starts from 0.
+      if (!CharGenManager.levelUpMode) {
+        CharGenManager.selectedCreature.skills[i].rank = 0;
+      }
     }
-    CharGenManager.computerUse = CharGenManager.selectedCreature.skills[0].rank;
-    CharGenManager.demolitions = CharGenManager.selectedCreature.skills[1].rank;
-    CharGenManager.stealth = CharGenManager.selectedCreature.skills[2].rank;
-    CharGenManager.awareness = CharGenManager.selectedCreature.skills[3].rank;
-    CharGenManager.persuade = CharGenManager.selectedCreature.skills[4].rank;
-    CharGenManager.repair = CharGenManager.selectedCreature.skills[5].rank;
-    CharGenManager.security = CharGenManager.selectedCreature.skills[6].rank;
-    CharGenManager.treatInjury = CharGenManager.selectedCreature.skills[7].rank;
+    // Coerce to a number — stored ranks may be "" (GFF default) on an unmodified creature.
+    const rank = (i: number) => parseInt(CharGenManager.selectedCreature.skills[i].rank as any) || 0;
+    CharGenManager.computerUse = rank(0);
+    CharGenManager.demolitions = rank(1);
+    CharGenManager.stealth = rank(2);
+    CharGenManager.awareness = rank(3);
+    CharGenManager.persuade = rank(4);
+    CharGenManager.repair = rank(5);
+    CharGenManager.security = rank(6);
+    CharGenManager.treatInjury = rank(7);
   }
 
   
@@ -368,9 +380,11 @@ export class CharGenManager {
     const cre = CharGenManager.selectedCreature;
     const base = parseInt(cre.classes[0].skillpointbase as any) || 0;
     const intMod = CharGenManager.abilityMod(cre.getINT());
-    // d20/KotOR: per-level points = skillpointbase + INT modifier; the FIRST
-    // level grants x4 that amount, with a floor of 4. (Chargen is always L1.)
-    return Math.max(4, (base + intMod) * 4);
+    // d20/KotOR (swkotor2.exe FUN_00846200): per-level points = max(1, skillpointbase + INT
+    // modifier); the FIRST character level grants x4 that amount, later levels grant x1.
+    const perLevel = Math.max(1, base + intMod);
+    const totalLevel = cre.getTotalClassLevel() || 1;
+    return (CharGenManager.levelUpMode || totalLevel > 1) ? perLevel : perLevel * 4;
   }
 
   /**
