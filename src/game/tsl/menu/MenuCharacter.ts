@@ -125,21 +125,24 @@ export class MenuCharacter extends K1_MenuCharacter {
         this.updatePartyMemberPortraitButtons();
       });
 
-      MDLLoader.loader.load('charmain_light').then((mdl: OdysseyModel) => {
+      // Use charrec_light (the TSL character_p dais): it carries the alignment aura
+      // animations (align1..align18 / good / evil) and the per-creature camerahook nodes.
+      // charmain_light was the wrong model (only a single "neutral" anim, no alignment
+      // poses), and the _3dView was being created *after* FromMDL — so the dais was built
+      // with an undefined render context.
+      MDLLoader.loader.load('charrec_light').then((mdl: OdysseyModel) => {
+        this._3dView = new LBL_3DView(this.LBL_3DCHAR.extent.width, this.LBL_3DCHAR.extent.height);
+        this._3dView.visible = true;
+        this._3dView.setControl(this.LBL_3DCHAR);
+        this._3dView.camera.aspect = this.LBL_3DCHAR.extent.width / this.LBL_3DCHAR.extent.height;
+        this._3dView.camera.updateProjectionMatrix();
+        (this.LBL_3DCHAR.getFill().material as any).visible = true;
+
         OdysseyModel3D.FromMDL(mdl, {
           context: this._3dView,
           // manageLighting: false,
         }).then((model: OdysseyModel3D) => {
           try{
-            this._3dView = new LBL_3DView();
-            this._3dView.visible = true;
-            this._3dView.camera.aspect = this.LBL_3DCHAR.extent.width / this.LBL_3DCHAR.extent.height;
-            this._3dView.camera.updateProjectionMatrix();
-            (this.LBL_3DCHAR.getFill().material as any).uniforms.map.value = this._3dView.texture.texture;
-            (this.LBL_3DCHAR.getFill().material as any).transparent = false;
-            this._3dView.setControl(this.LBL_3DCHAR);
-            (this.LBL_3DCHAR.getFill().material as any).visible = true;
-
             this._3dViewModel = model;
             this._3dView.addModel(this._3dViewModel);
 

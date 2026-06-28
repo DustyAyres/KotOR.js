@@ -87,6 +87,7 @@ export class MenuCharacter extends GameMenu {
   _3dViewModel: OdysseyModel3D;
   _3dView: LBL_3DView;
   char: OdysseyModel3D;
+  _portraitLoadGen: number = 0;
 
   constructor(){
     super();
@@ -306,11 +307,25 @@ export class MenuCharacter extends GameMenu {
 
     const portraitAttachRoot = this._3dViewModel?.getRootOdysseyNode?.() || this._3dViewModel;
 
+    // The preview render target has no usable lighting on its own (the area's lights don't
+    // apply to it), so creature models render black/invisible. Add a one-time ambient light
+    // so the character is actually visible standing on the dais.
+    if (this._3dView && !this._3dView.scene.getObjectByName('__char_ambient')) {
+      const ambient = new THREE.AmbientLight(0xffffff, 1.5);
+      ambient.name = '__char_ambient';
+      this._3dView.scene.add(ambient);
+    }
+
     if (this.char) {
       this.char.removeFromParent();
+      this.char = undefined;
     }
     if(creature){
-      this._3dView.camera.position.z = 1;
+      // updateCharacterPortrait gets called more than once per open (show() plus the
+      // PartyManager 'change' listener). loadModel() is async, so without a guard both
+      // calls finish and stack two overlapping clones on the dais. Tag each load and let
+      // only the most recent one attach.
+      const loadGen = (this._portraitLoadGen = (this._portraitLoadGen || 0) + 1);
       let objectCreature = new GameState.Module.ModuleArea.ModuleCreature();
       let clone = creature;
       objectCreature.setAppearance(clone.appearance);
@@ -359,57 +374,76 @@ export class MenuCharacter extends GameMenu {
         this._3dViewModel.playAnimation('evil');
       }
       objectCreature.loadModel().then( (model: OdysseyModel3D) => {
+        // A newer portrait load superseded this one while it was in flight — drop it.
+        if (loadGen !== this._portraitLoadGen) {
+          model.removeFromParent?.();
+          return;
+        }
+        if (this.char) {
+          this.char.removeFromParent();
+        }
+        // Stand the character upright. Odyssey models are Z-up, so the only rotation needed
+        // is a 180° yaw so the character faces the camera. The previous code also applied
+        // rotation.x = -PI/2, which tipped the model onto its side — it never appeared
+        // standing (and with the camera aimed at the dais camerahook, usually off-frame).
         model.position.set(0, 0, 0);
-        model.rotation.x = -Math.PI / 2;
-        model.rotation.z = Math.PI;
+        model.rotation.set(0, 0, Math.PI);
         model.box = new THREE.Box3().setFromObject(model);
         this.char = model;
         portraitAttachRoot?.add(this.char);
+        this.frameCharacterModel(model);
         TextureLoader.LoadQueue().then(() => {
-          if (clone.goodEvil >= 95) {
-            this.char.playAnimation('good', true);
-          } else if (clone.goodEvil >= 90) {
-            this.char.playAnimation('good', true);
-          } else if (clone.goodEvil >= 85) {
-            this.char.playAnimation('good', true);
-          } else if (clone.goodEvil >= 80) {
-            this.char.playAnimation('good', true);
-          } else if (clone.goodEvil >= 75) {
-            this.char.playAnimation('good', true);
-          } else if (clone.goodEvil >= 70) {
-            this.char.playAnimation('good', true);
-          } else if (clone.goodEvil >= 65) {
-            this.char.playAnimation('good', true);
-          } else if (clone.goodEvil >= 60) {
-            this.char.playAnimation('good', true);
-          } else if (clone.goodEvil >= 55) {
-            this.char.playAnimation('neutral', true);
-          } else if (clone.goodEvil >= 50) {
-            this.char.playAnimation('neutral', true);
-          } else if (clone.goodEvil >= 45) {
-            this.char.playAnimation('neutral', true);
-          } else if (clone.goodEvil >= 40) {
-            this.char.playAnimation('evil', true);
-          } else if (clone.goodEvil >= 35) {
-            this.char.playAnimation('evil', true);
-          } else if (clone.goodEvil >= 30) {
-            this.char.playAnimation('evil', true);
-          } else if (clone.goodEvil >= 25) {
-            this.char.playAnimation('evil', true);
-          } else if (clone.goodEvil >= 20) {
-            this.char.playAnimation('evil', true);
-          } else if (clone.goodEvil >= 15) {
-            this.char.playAnimation('evil', true);
-          } else if (clone.goodEvil >= 10) {
-            this.char.playAnimation('evil', true);
-          } else if (clone.goodEvil >= 5) {
-            this.char.playAnimation('evil', true);
-          } else if (clone.goodEvil >= 0) {
-            this.char.playAnimation('evil', true);
-          }
+          this.playCreaturePose(this.char, clone);
         });
       });
     }
+  }
+
+  /**
+   * Frame the standing (Z-up) character head-to-toe and face it toward the preview camera.
+   * The dais camerahook does not frame a creature attached at the origin, so we derive the
+   * camera from the character's own bounding box (which is what the engine effectively does:
+   * look at the creature with a fitted distance).
+   */
+  frameCharacterModel(model: OdysseyModel3D){
+    const view = this._3dView;
+    if(!view || !model) return;
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model);
+    const center = box.getCenter(new THREE.Vector3());
+    const height = box.max.z - box.min.z;
+    const fov = (view.camera.fov * Math.PI) / 180;
+    const dist = (height / 2) / Math.tan(fov / 2) * 1.15;
+    view.camera.up.set(0, 0, 1);
+    view.camera.position.set(center.x, center.y - dist, center.z);
+    view.camera.lookAt(center.x, center.y, center.z);
+    view.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Play the alignment-based standing pose on the creature model. Matches the engine
+   * (swkotor2.exe FUN_0077ec20): evil < 40 <= neutral < 60 <= good; droid party members
+   * use "pause1"; fall back to "pause1" if the alignment pose isn't in the model's anim set
+   * (the engine's own guard for an unresolved animation).
+   */
+  playCreaturePose(model: OdysseyModel3D, creature: ModuleCreature){
+    if(!model) return;
+    const goodEvil = creature.getGoodEvil();
+    const tag = (creature.getTag ? creature.getTag() : '').toLowerCase();
+    let pose: string;
+    if (tag === 't3m4' || tag === 'hk47' || tag === '3cfd') {
+      pose = 'pause1';
+    } else if (goodEvil < 40) {
+      pose = 'evil';
+    } else if (goodEvil < 60) {
+      pose = 'neutral';
+    } else {
+      pose = 'good';
+    }
+    if (!model.odysseyAnimationMap.has(pose)) {
+      pose = 'pause1';
+    }
+    model.playAnimation(pose, true);
   }
 
   triggerControllerBumperLPress() {
