@@ -332,6 +332,13 @@ export class MenuCharacter extends GameMenu {
       if (clone.equipment.ARMOR) {
         objectCreature.equipment.ARMOR = new GameState.Module.ModuleArea.ModuleItem(clone.equipment.ARMOR.template);
       }
+      // Mirror the source creature's HP. The throwaway preview clone otherwise loads at
+      // 0/0 HP, which makes the engine pick the injured idle (pauseinj) on load — a brief
+      // wrong-pose flicker before the alignment pose is applied.
+      objectCreature.hitPoints = clone.hitPoints || clone.getMaxHP?.() || 1;
+      objectCreature.maxHitPoints = clone.maxHitPoints || clone.getMaxHP?.() || 1;
+      objectCreature.currentHitPoints = clone.currentHitPoints || clone.getHP?.() || objectCreature.maxHitPoints;
+      objectCreature.min1HP = true;
       if (clone.goodEvil >= 95) {
         this._3dViewModel.playAnimation('good');
       } else if (clone.goodEvil >= 90) {
@@ -392,6 +399,9 @@ export class MenuCharacter extends GameMenu {
         this.char = model;
         portraitAttachRoot?.add(this.char);
         this.frameCharacterModel(model);
+        // Apply the pose immediately (pose animations don't need textures) so the model
+        // never renders the load-time idle frame before textures finish loading.
+        this.playCreaturePose(this.char, clone);
         TextureLoader.LoadQueue().then(() => {
           this.playCreaturePose(this.char, clone);
         });
