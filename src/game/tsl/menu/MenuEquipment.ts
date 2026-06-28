@@ -531,8 +531,9 @@ export class MenuEquipment extends K1_MenuEquipment {
     this.LBL_TOHITR?.setText(rWeap ? babStr : '-');
     this.LBL_TOHITL?.setText(lWeap ? babStr : '-');
     this.LBL_ATTACKMOD?.setText(babStr);
+    // baseItem.die already includes the "d" prefix (e.g. "d10"), so don't add another.
     this.LBL_DAMAGE?.setText(
-      rWeap && rWeap.baseItem?.numDice ? `${rWeap.baseItem.numDice}d${rWeap.baseItem.die}` : '-'
+      rWeap && rWeap.baseItem?.numDice ? `${rWeap.baseItem.numDice}${rWeap.baseItem.die}` : '-'
     );
 
     this.updateSlotIcons(true);

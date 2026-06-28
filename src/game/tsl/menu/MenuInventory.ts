@@ -173,6 +173,17 @@ export class MenuInventory extends K1_MenuInventory {
     this.LB_ITEMS.setItems(inventory);
   }
 
+  /**
+   * The TSL inventory_p layout has no portrait/vitality/defense panel (those live on the
+   * character & equipment screens), only the credits readout. The K1 base updateCharacterStats
+   * crashes here dereferencing LBL_PORT/LBL_VIT/LBL_DEF, which don't exist in this gui — and
+   * that crash (thrown before the credits line) left credits showing the .gui placeholder
+   * "9999999" instead of the real total. Override to only touch controls that exist.
+   */
+  updateCharacterStats(){
+    this.LBL_CREDITS_VALUE?.setText(String(GameState.PartyManager.Gold ?? 0));
+  }
+
   show() {
     super.show();
     this.filter = InventoryFilter.ALL;
