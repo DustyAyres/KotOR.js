@@ -1073,7 +1073,13 @@ export class ModuleCreature extends ModuleObject {
             }else{*/
               distance = this.position.distanceTo(target.position);
             // }
-          return distance < ( (this.combatData.getEquippedWeaponType() == 1 || this.combatData.getEquippedWeaponType() == 3) ? 2.0 : 15.0 );
+          // Ranged-vs-melee threshold keys off the rangedweapon flag (baseitem+0x1a) —
+          // matching the engine (FUN_00580330) and the sibling check in
+          // ActionPhysicalAttacks. The old test used getEquippedWeaponType() (the DAMAGE
+          // type: PIERCING=1 / SLASHING=3), but a blaster is weapontype PIERCING yet
+          // rangedweapon=1, so it picked the 2m melee threshold → the creature reported
+          // "out of range" until point-blank, walked into melee, and never fired.
+          return distance < ( this.isRangedEquipped() ? 15.0 : 2.0 );
         }else{
           return true;
         }
