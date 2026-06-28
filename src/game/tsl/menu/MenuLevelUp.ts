@@ -2,6 +2,7 @@ import { GameState } from "@/GameState";
 import type { GUIButton, GUIControl, GUILabel } from "@/gui";
 import type { ModuleCreature } from "@/module";
 import { MenuLevelUp as K1_MenuLevelUp } from "@/game/kotor/KOTOR";
+import { MenuLevelUpPowers } from "@/game/tsl/menu/MenuLevelUpPowers";
 
 /**
  * MenuLevelUp class.
@@ -50,6 +51,8 @@ export class MenuLevelUp extends K1_MenuLevelUp {
   done = { attributes: false, skills: false, feats: false, powers: false };
   /** Snapshot of creature state captured at wizard start, for cancel. */
   private snapshot: any = null;
+  /** Lazily-loaded force-power selection step (no shared loader registers it). */
+  private powersMenu: MenuLevelUpPowers = null as any;
 
   constructor(){
     super();
@@ -110,6 +113,9 @@ export class MenuLevelUp extends K1_MenuLevelUp {
     // level-up-specific loader, which skips CharGenMain (its 3D init isn't needed here).
     if(!this.manager.CharGenSkills){
       await this.manager.LoadLevelUpGameMenus();
+    }
+    if(!this.powersMenu){
+      this.powersMenu = await this.manager.GameMenuLoader(MenuLevelUpPowers) as MenuLevelUpPowers;
     }
     this.creature = creature;
     this.levelClassIndex = this.getMainClassIndex(creature);
@@ -234,9 +240,10 @@ export class MenuLevelUp extends K1_MenuLevelUp {
   }
 
   openPowersStep(){
-    // Wired in a later slice (force-power picker). Placeholder: mark done.
+    if(!this.powersMenu){ this.done.powers = true; this.updateStepPanel(); return; }
+    this.powersMenu.setup(this.creature, this.levelClassIndex, this.getPowerGrantCount());
     this.done.powers = true;
-    this.updateStepPanel();
+    this.powersMenu.open();
   }
 
   // ---- Commit / cancel ---------------------------------------------------

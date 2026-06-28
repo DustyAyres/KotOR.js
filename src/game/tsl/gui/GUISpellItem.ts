@@ -94,6 +94,7 @@ export class GUISpellItem extends GUIProtoItem {
         this.widget.add(_buttonIconWidget);
 
         TextureLoader.enQueue('uibit_abi_back', this.border.fill.material, TextureType.TEXTURE, (texture: OdysseyTexture) => {
+          if(!texture) return; // icon/back texture missing — don't crash the whole list render
           buttonIcon.setMaterialTexture( buttonIcon.border.fill.material, texture);
           buttonIcon.border.fill.material.transparent = true;
           buttonIcon.setMaterialTexture( buttonIcon.highlight.fill.material, texture);
@@ -118,6 +119,7 @@ export class GUISpellItem extends GUIProtoItem {
         this.widget.userData.iconSprite.position.z = 5;
         this.widget.userData.iconSprite.renderOrder = 5;
         TextureLoader.enQueue((isUnknown && !hasSpell) ? 'ip_secret' : spell.iconresref, this.widget.userData.iconMaterial, TextureType.TEXTURE, (texture: OdysseyTexture) => {
+          if(!texture || !texture.image) return; // missing power icon — skip rather than crash
           this.widget.userData.iconSprite.scale.x = texture.image.width;
           this.widget.userData.iconSprite.scale.y = texture.image.height;
           if(locked && !isUnknown){
@@ -165,6 +167,7 @@ export class GUISpellItem extends GUIProtoItem {
           this.widget.add(_arrowIconWidget);
 
           TextureLoader.enQueue('uibit_abi_arrow', this.border.fill.material, TextureType.TEXTURE, (texture: OdysseyTexture) => {
+            if(!texture) return;
             arrowIcon.setMaterialTexture( arrowIcon.border.fill.material, texture);
             arrowIcon.border.fill.material.transparent = true;
             arrowIcon.setMaterialTexture( arrowIcon.highlight.fill.material, texture);
