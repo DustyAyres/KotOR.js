@@ -1192,6 +1192,14 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
     const fineCount = this.getLightningPointCount(boltLen);
     const phase = smoothing ? Math.min(this._lxTimerCoarse / Math.max(this.controlPTDelay, 1e-6), 1) : 1;
 
+    //The count is distance-derived and actors move: if it drifted since the offsets were
+    //rolled, the interior/endpoint classification baked into the offset array is invalid
+    //(the targetSize endpoint jitter would land mid-bolt, or the live endpoint would read an
+    //interior roll). Treat a count change as an early fine re-roll.
+    if(!fineRebuild && this._lxFineOffset.length !== fineCount){
+      fineRebuild = true;
+    }
+
     if(fineRebuild){
       this._lxTimerFine = 0;
       this.lxSampleSpline(this._lxFineBase, fineCount, phase, start, end);
@@ -1303,18 +1311,27 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
    * The outermost control points are pinned to the live start/end so the bolt tracks moving
    * actors between coarse rebuilds.
    */
+  private static readonly _lxP0 = new THREE.Vector3();
+  private static readonly _lxP1 = new THREE.Vector3();
+  private static readonly _lxT0 = new THREE.Vector3();
+  private static readonly _lxT1 = new THREE.Vector3();
+  private static readonly _lxC0 = new THREE.Vector3();
+  private static readonly _lxC1 = new THREE.Vector3();
   private lxSampleSpline(out: THREE.Vector3[], count: number, phase: number, start: THREE.Vector3, end: THREE.Vector3){
     const newP = this._lxCoarseNewP, newT = this._lxCoarseNewT;
     const oldP = this._lxCoarseOldP.length == newP.length ? this._lxCoarseOldP : newP;
     const oldT = this._lxCoarseOldT.length == newT.length ? this._lxCoarseOldT : newT;
     const cc = newP.length;
-    out.length = 0;
+    //grow-only vector pool: this runs every frame on smoothing strands, so reuse the Vector3s
+    while(out.length < count) out.push(new THREE.Vector3());
+    out.length = count;
     if(cc < 2){
-      for(let i = 0; i < count; i++) out.push(new THREE.Vector3().lerpVectors(start, end, count > 1 ? i / (count - 1) : 0));
+      for(let i = 0; i < count; i++) out[i].lerpVectors(start, end, count > 1 ? i / (count - 1) : 0);
       return;
     }
-    const P0 = new THREE.Vector3(), P1 = new THREE.Vector3(), T0 = new THREE.Vector3(), T1 = new THREE.Vector3();
-    const C0 = new THREE.Vector3(), C1 = new THREE.Vector3();
+    const P0 = OdysseyEmitter3D._lxP0, P1 = OdysseyEmitter3D._lxP1;
+    const T0 = OdysseyEmitter3D._lxT0, T1 = OdysseyEmitter3D._lxT1;
+    const C0 = OdysseyEmitter3D._lxC0, C1 = OdysseyEmitter3D._lxC1;
     for(let i = 0; i < count; i++){
       const s = count > 1 ? i / (count - 1) : 0;
       const f = s * (cc - 1);
@@ -1329,11 +1346,11 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
       C0.copy(P0).add(T0);
       C1.copy(P1).sub(T1);
       const w0 = (1 - u) * (1 - u) * (1 - u), w1 = 3 * u * (1 - u) * (1 - u), w2 = 3 * u * u * (1 - u), w3 = u * u * u;
-      out.push(new THREE.Vector3(
+      out[i].set(
         P0.x * w0 + C0.x * w1 + C1.x * w2 + P1.x * w3,
         P0.y * w0 + C0.y * w1 + C1.y * w2 + P1.y * w3,
         P0.z * w0 + C0.z * w1 + C1.z * w2 + P1.z * w3
-      ));
+      );
     }
   }
 
@@ -1451,38 +1468,105 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
   }
 
   /**
+   * Preallocated, grow-only geometry storage for the lightning ribbon. lxAuthorGeometry runs
+   * EVERY frame (the camera-plane quads must re-orient and the shape morphs/follows), so
+   * allocating fresh BufferAttributes per frame would churn GC and strand a WebGL buffer per
+   * attribute per frame. Instead the typed arrays are written in place and flagged
+   * needsUpdate; attributes are only (re)created when the required capacity grows. The index,
+   * uv, normal and offset content is static per quad slot (quads don't share verts —
+   * continuity comes from writing identical positions), so those fill once per growth.
+   */
+  private _lxCapVerts: number = 0;
+  private _lxArrPos: Float32Array;
+  private _lxArrCol: Float32Array;
+  private _lxArrProps: Float32Array;
+  private _lxWriteVert: number = 0;
+  private _lxBranchBasePool: THREE.Vector3[] = [];
+  private static readonly _lxCamQ = new THREE.Quaternion();
+  private static readonly _lxCamA = new THREE.Vector3();
+  private static readonly _lxCamB = new THREE.Vector3();
+  private static readonly _lxDelta3 = new THREE.Vector3();
+  private static readonly _lxSide = new THREE.Vector3();
+  private static readonly _lxDirV = new THREE.Vector3();
+  private static readonly _lxPntP = new THREE.Vector3();
+  private static readonly _lxPntQ = new THREE.Vector3();
+  private static readonly _lxPrevR = new THREE.Vector3();
+  private static readonly _lxPrevL = new THREE.Vector3();
+  private static readonly _lxAttach = new THREE.Vector3();
+
+  private lxEnsureGeomCapacity(verts: number){
+    if(verts <= this._lxCapVerts) return;
+    //grow in whole quads with 50% headroom; Uint16 index space bounds the capacity
+    const cap = Math.min(Math.ceil((verts * 1.5) / 4) * 4, 65532);
+    this._lxCapVerts = cap;
+    this._lxArrPos = new Float32Array(cap * 3);
+    this._lxArrCol = new Float32Array(cap * 4);
+    this._lxArrProps = new Float32Array(cap * 4);
+    const uv = new Float32Array(cap * 2);
+    const nrm = new Float32Array(cap * 3);
+    const off = new Float32Array(cap * 4);
+    const quads = cap / 4;
+    const index = new Uint16Array(quads * 6);
+    for(let q = 0; q < quads; q++){
+      const b = q * 4, o = q * 6;
+      index[o] = b; index[o + 1] = b + 1; index[o + 2] = b + 2;
+      index[o + 3] = b + 1; index[o + 4] = b + 3; index[o + 5] = b + 2;
+    }
+    for(let i = 0; i < cap; i++){
+      nrm[i * 3 + 2] = 1;
+      //props (age, maxAge, alive, splat): maxAge/alive are constant 1; age written per frame
+      this._lxArrProps[i * 4 + 1] = 1;
+      this._lxArrProps[i * 4 + 2] = 1;
+      //one full texture cell per segment: quad verts [P+, P-, Q+, Q-] = (1,1) (0,1) (1,0) (0,0)
+      const k = i & 3;
+      uv[i * 2] = (k === 0 || k === 2) ? 1 : 0;
+      uv[i * 2 + 1] = (k < 2) ? 1 : 0;
+    }
+    this.geometry.setIndex(new THREE.BufferAttribute(index, 1));
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(this._lxArrPos, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geometry.setAttribute('offset', new THREE.BufferAttribute(off, 4));
+    this.geometry.setAttribute('props', new THREE.BufferAttribute(this._lxArrProps, 4).setUsage(THREE.DynamicDrawUsage));
+    this.geometry.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+    this.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    this.geometry.setAttribute('pColor', new THREE.BufferAttribute(this._lxArrCol, 4).setUsage(THREE.DynamicDrawUsage));
+    this.velocities = this.geometry.getAttribute('offset') as THREE.BufferAttribute;
+    this.props = this.geometry.getAttribute('props') as THREE.BufferAttribute;
+  }
+
+  /**
    * Build the ribbon geometry from the current fine points + offsets (root bolt and branches):
    * per-SEGMENT camera-plane-facing quads (segment direction projected onto the camera
    * right/up plane), gapless via shared edge positions, width = 2*interp(size, t) (the ±offset
    * magnitude IS the interp value), per-segment flat RGBA baked into the pColor attribute, and
-   * one full texture cell per segment.
+   * one full texture cell per segment. Writes in place into the preallocated buffers.
    */
   private lxAuthorGeometry(delta: number){
-    const camera: THREE.Camera = this.context ? this.context.currentCamera : undefined;
-    const camQ = new THREE.Quaternion();
-    if(camera) camera.getWorldQuaternion(camQ);
-    const A = new THREE.Vector3(1, 0, 0).applyQuaternion(camQ); //camera right
-    const B = new THREE.Vector3(0, 1, 0).applyQuaternion(camQ); //camera up
+    //total verts this frame: 4 per segment, root + branches
+    let needed = Math.max(this._lxFineBase.length - 1, 0) * 4;
+    for(const br of this._lxBranches) needed += Math.max(br.count - 1, 0) * 4;
+    if(needed <= 0){
+      this.geometry.setDrawRange(0, 0);
+      return;
+    }
+    this.lxEnsureGeomCapacity(needed);
 
-    const vertices: number[] = [];
-    const uvs: number[] = [];
-    const colors: number[] = [];
-    const props: number[] = [];
-    const offsets4: number[] = [];
-    const normals: number[] = [];
-    const indices: number[] = [];
+    const camera: THREE.Camera = this.context ? this.context.currentCamera : undefined;
+    const camQ = OdysseyEmitter3D._lxCamQ.identity();
+    if(camera) camera.getWorldQuaternion(camQ);
+    const A = OdysseyEmitter3D._lxCamA.set(1, 0, 0).applyQuaternion(camQ); //camera right
+    const B = OdysseyEmitter3D._lxCamB.set(0, 1, 0).applyQuaternion(camQ); //camera up
 
     //sprite-frame clock (only meaningful for animated multi-cell sheets; fx_lightning is 1x1)
-    const propsAttr = this.geometry.attributes.props as THREE.BufferAttribute;
-    let age = ((propsAttr && propsAttr.count > 0 ? propsAttr.getX(0) : 0) || 0) + delta;
+    let age = (this._lxArrProps[0] || 0) + delta;
     if(age >= 1) age = 0;
 
-    const delta3 = new THREE.Vector3(), side = new THREE.Vector3(), dirV = new THREE.Vector3();
-    const p = new THREE.Vector3(), pq = new THREE.Vector3();
-    const prevR = new THREE.Vector3(), prevL = new THREE.Vector3();
+    const pos = this._lxArrPos, col = this._lxArrCol, props = this._lxArrProps;
+    const delta3 = OdysseyEmitter3D._lxDelta3, side = OdysseyEmitter3D._lxSide, dirV = OdysseyEmitter3D._lxDirV;
+    const p = OdysseyEmitter3D._lxPntP, pq = OdysseyEmitter3D._lxPntQ;
+    const prevR = OdysseyEmitter3D._lxPrevR, prevL = OdysseyEmitter3D._lxPrevL;
+    this._lxWriteVert = 0;
 
-    const authorStrand = (base: THREE.Vector3[], offs: THREE.Vector3[], sizeScale: number) => {
-      const count = base.length;
+    const authorStrand = (base: THREE.Vector3[], count: number, offs: THREE.Vector3[], sizeScale: number) => {
       if(count < 2) return;
       let havePrev = false;
       for(let i = 0; i < count - 1; i++){
@@ -1524,65 +1608,54 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
         const al = THREE.MathUtils.clamp(this.lxInterp(this.opacity[0], this.opacity[1], this.opacity[2], t), 0, 1);
 
         //quad corners [P+, P-, Q+, Q-]; reuse the previous quad's far edge for a gapless ribbon
-        const vBase = vertices.length / 3;
+        const vi = this._lxWriteVert;
+        let o = vi * 3;
         if(havePrev){
-          vertices.push(prevR.x, prevR.y, prevR.z);
-          vertices.push(prevL.x, prevL.y, prevL.z);
+          pos[o++] = prevR.x; pos[o++] = prevR.y; pos[o++] = prevR.z;
+          pos[o++] = prevL.x; pos[o++] = prevL.y; pos[o++] = prevL.z;
         }else{
-          vertices.push(p.x + side.x - dirV.x, p.y + side.y - dirV.y, p.z + side.z - dirV.z);
-          vertices.push(p.x - side.x - dirV.x, p.y - side.y - dirV.y, p.z - side.z - dirV.z);
+          pos[o++] = p.x + side.x - dirV.x; pos[o++] = p.y + side.y - dirV.y; pos[o++] = p.z + side.z - dirV.z;
+          pos[o++] = p.x - side.x - dirV.x; pos[o++] = p.y - side.y - dirV.y; pos[o++] = p.z - side.z - dirV.z;
         }
         prevR.set(pq.x + side.x + dirV.x, pq.y + side.y + dirV.y, pq.z + side.z + dirV.z);
         prevL.set(pq.x - side.x + dirV.x, pq.y - side.y + dirV.y, pq.z - side.z + dirV.z);
-        vertices.push(prevR.x, prevR.y, prevR.z);
-        vertices.push(prevL.x, prevL.y, prevL.z);
+        pos[o++] = prevR.x; pos[o++] = prevR.y; pos[o++] = prevR.z;
+        pos[o++] = prevL.x; pos[o++] = prevL.y; pos[o++] = prevL.z;
         havePrev = true;
 
-        //one full texture cell per segment: u across the width, v along the segment
-        uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-
         for(let k = 0; k < 4; k++){
-          colors.push(r, g, bl, al);
-          props.push(age, 1, 1, 0);
-          offsets4.push(0, 0, 0, 0);
-          normals.push(0, 0, 1);
+          const c = (vi + k) * 4;
+          col[c] = r; col[c + 1] = g; col[c + 2] = bl; col[c + 3] = al;
+          props[c] = age;
         }
-
-        indices.push(vBase, vBase + 1, vBase + 2);
-        indices.push(vBase + 1, vBase + 3, vBase + 2);
+        this._lxWriteVert = vi + 4;
       }
     };
 
     //root bolt
-    authorStrand(this._lxFineBase, this._lxFineOffset, 1.0);
+    authorStrand(this._lxFineBase, this._lxFineBase.length, this._lxFineOffset, 1.0);
 
     //branch forks, anchored to their live attach point on the root bolt (the engine anchors
     //children at finePoint + jitterOffset of the anchor index)
-    const bBase: THREE.Vector3[] = [];
-    const bAttach = new THREE.Vector3();
+    const bBase = this._lxBranchBasePool;
+    const bAttach = OdysseyEmitter3D._lxAttach;
     for(const br of this._lxBranches){
       const idx = Math.min(br.attachIndex, this._lxFineBase.length - 1);
       const attach = this._lxFineBase[idx];
       if(!attach) continue;
       bAttach.copy(attach).add(this._lxFineOffset[idx] || OdysseyEmitter3D._v3ZERO);
-      bBase.length = 0;
+      while(bBase.length < br.count) bBase.push(new THREE.Vector3());
       for(let i = 0; i < br.count; i++){
-        bBase.push(new THREE.Vector3().copy(br.endRel).multiplyScalar(br.count > 1 ? i / (br.count - 1) : 0).add(bAttach));
+        bBase[i].copy(br.endRel).multiplyScalar(br.count > 1 ? i / (br.count - 1) : 0).add(bAttach);
       }
-      authorStrand(bBase, br.offsets, br.sizeScale);
+      authorStrand(bBase, br.count, br.offsets, br.sizeScale);
     }
 
-    this.geometry.setIndex(indices);
-    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    this.geometry.setAttribute('offset', new THREE.Float32BufferAttribute(offsets4, 4));
-    this.geometry.setAttribute('props', new THREE.Float32BufferAttribute(props, 4));
-    this.geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    this.geometry.setAttribute('pColor', new THREE.Float32BufferAttribute(colors, 4));
-
-    //update references to the newly created attributes
-    this.velocities = this.geometry.getAttribute('offset') as THREE.BufferAttribute;
-    this.props = this.geometry.getAttribute('props') as THREE.BufferAttribute;
+    //flag the in-place writes and mask the unused capacity
+    this.geometry.setDrawRange(0, (this._lxWriteVert / 4) * 6);
+    (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    (this.geometry.getAttribute('pColor') as THREE.BufferAttribute).needsUpdate = true;
+    (this.geometry.getAttribute('props') as THREE.BufferAttribute).needsUpdate = true;
 
     if(this.geometry.boundingSphere)
       this.geometry.boundingSphere.radius = this._lxPrevStart.distanceTo(this._lxPrevEnd) * 1.5 + 1;
