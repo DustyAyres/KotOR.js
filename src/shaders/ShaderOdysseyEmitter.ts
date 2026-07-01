@@ -77,6 +77,12 @@ export class ShaderOdysseyEmitter extends Shader {
     attribute vec4 velocity;
     attribute vec4 props;
     attribute float ids;
+    #ifdef LIGHTNING
+      // Baked per-vertex RGBA: the engine lerps colorStart->colorEnd / alphaStart->alphaEnd
+      // along the BOLT (t = segment/count, render style 6), flat per segment — not over
+      // particle lifetime. tickLightning writes the interpolated color per vertex.
+      attribute vec4 pColor;
+    #endif
     varying vec4 vSpriteSheet;
     varying vec3 colorMixed;
     varying float alpha;
@@ -275,6 +281,10 @@ export class ShaderOdysseyEmitter extends Shader {
             //Override the modelViewMatrix so we can ignore preset rotation's (That way the plane will lay flat on the ground)
             mat4 worldZMatrix = viewMatrix * mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, vec4(0.0, 0.0, 0.0, 1.0));
             gl_Position = projectionMatrix * worldZMatrix * vec4(position, 1.0);
+            // Bolt color/alpha are baked per-vertex (along-bolt lerp), replacing the
+            // lifetime-driven colorMixed/alpha computed above.
+            colorMixed = pColor.rgb;
+            alpha = pColor.a;
           #else
             // Linked ribbon: full world-space L/R in position; offset buffer unused — do not add scaleF here
             mat4 worldZMatrix = viewMatrix * mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, vec4(0.0, 0.0, 0.0, 1.0));

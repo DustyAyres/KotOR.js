@@ -2617,6 +2617,15 @@ export class ModuleObject {
       return;
     }
 
+    // The engine copies the CGameEffect on every application — a script's effect variable is
+    // a template. Re-applying an already-applied instance (AOE loops apply the same effect
+    // value to each victim) must clone it; otherwise the instance is re-pointed at the last
+    // target (one shared beam aiming at the wrong victim) and the applied-guard in onApply
+    // silently swallows every application after the first.
+    if(effect.applied){
+      effect = effect.clone();
+    }
+
     effect.setAttachedObject(this);
     effect.loadModel();
     effect.onApply(this);

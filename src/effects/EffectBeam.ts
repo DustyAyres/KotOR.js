@@ -25,6 +25,9 @@ export class EffectBeam extends GameEffect {
   removed: boolean = false;
   targetTracker: THREE.Object3D;
 
+  private static _aim = new THREE.Vector3();
+  private static _forward = new THREE.Vector3(0, 0, 1);
+
   constructor(){
     super();
     this.type = GameEffectType.EffectBeam;
@@ -179,6 +182,14 @@ export class EffectBeam extends GameEffect {
         em.referenceNode = this.targetTracker;
       }
 
+      // The engine plays 'cast01' on the fxbeam model when it attaches (FUN_00874880) —
+      // only some beam models author it (e.g. v_fshock_dur); missing is a no-op.
+      try{
+        if((this.model as any).odysseyAnimationMap?.has?.('cast01')){
+          this.model.playAnimation('cast01', false);
+        }
+      }catch(e){ /* animation is cosmetic */ }
+
       this.attached = true;
     }
   }
@@ -237,41 +248,54 @@ export class EffectBeam extends GameEffect {
       // ModuleObject world coordinates (== container world pos), so no stale-matrix dependency.
       const caster: any = this.getCaster();
       if(caster){
-        // Anchor the bolt START at the caster's casting HAND, not the creature's ground origin.
-        // caster.position has z≈0 (the feet), which made the bolt shoot from the floor. rhand is the
-        // same hook the spell system uses as its projectileHook (SpellCastInstance); fall back to
-        // lhand/handconjure, then to a raised offset above the origin if no hand node exists.
+        // Anchor the bolt START at the caster body node the script asked for. The engine maps
+        // EffectBeam's nBodyPart to a node name on the caster (FUN_0086f530): 0=handconjure,
+        // 1=impact, 2=headconjure, 3=lhand, 4=rhand, else root. Fall back through the casting
+        // hand hooks, then to a raised offset above the origin if no node exists.
         const m: any = caster.model;
-        const hook: any = m?.rhand || m?.lhand || m?.handconjure;
+        const partNames = ['handconjure', 'impact', 'headconjure', 'lhand', 'rhand'];
+        const partName = partNames[this.getInt(1)] || '';
+        const hook: any = (partName && m?.[partName]) || m?.handconjure || m?.rhand || m?.lhand;
         if(hook?.getWorldPosition){
           hook.getWorldPosition(this.model.position);
         }else if(caster.position){
           this.model.position.copy(caster.position);
           this.model.position.z += 1.6;
         }
-        this.model.updateMatrixWorld(true);
       }
       if(this.targetTracker && this.object && (this.object as any).position){
-        // Aim the bolt END at the target's torso (~1 unit above its ground origin) so the lightning
-        // strikes the body rather than the floor at the target's feet.
-        this.targetTracker.position.copy((this.object as any).position);
-        this.targetTracker.position.z += 1.0;
+        // Bolt END = the target's 'impact' node (the engine re-parents the beam's
+        // _EmitterTarget dummy onto it — Gob::SetBeamTarget); fall back to torso height above
+        // the target origin when the model has no impact hook.
+        const tm: any = (this.object as any).model;
+        const impact: any = tm?.impact;
+        if(impact?.getWorldPosition){
+          impact.getWorldPosition(this.targetTracker.position);
+        }else{
+          this.targetTracker.position.copy((this.object as any).position);
+          this.targetTracker.position.z += 1.0;
+        }
         this.targetTracker.updateMatrixWorld(true);
-      }
 
-      // Re-wire each Lightning emitter's endpoint to the target tracker EVERY frame (not just once
-      // in attachBeam) and trip its rebuild timer so it re-authors the bolt this tick:
-      //  - referenceNode: the one-time attachBeam assignment did not reliably reach the emitters
-      //    that actually render (some kept a default endpoint, leaving the bolt pointed at the
-      //    caster/origin). Setting it here each frame is authoritative regardless of any internal
-      //    reset/rebuild of the emitter list.
-      //  - _lightningDelay: tickLightning only rebuilds the position buffer when its delay timer
-      //    elapses; otherwise it updates props only. Force the rebuild so the bolt tracks the live
-      //    caster->target world positions every frame (also gives the natural lightning flicker).
+        // The engine rotates the whole fxbeam model so its +Z aims at the target. The strand
+        // emitters' authored node orientations then tilt each bolt's exit tangent off that
+        // axis (tickLightning reads local +Z for the coarse T[0]) — this fans multi-strand
+        // beams apart at the hand instead of stacking them.
+        EffectBeam._aim.subVectors(this.targetTracker.position, this.model.position);
+        if(EffectBeam._aim.lengthSq() > 1e-8){
+          this.model.quaternion.setFromUnitVectors(EffectBeam._forward, EffectBeam._aim.normalize());
+        }
+      }
+      this.model.updateMatrixWorld(true);
+
+      // Re-wire each Lightning emitter's endpoint to the target tracker EVERY frame (not just
+      // once in attachBeam — the one-time assignment did not reliably reach the emitters that
+      // actually render). The rebuild cadence itself is AUTHORED (lightningDelay /
+      // controlPTDelay timers inside tickLightning) — do NOT force it per frame; the emitter
+      // rigid-follows the endpoints between re-rolls, exactly like the engine.
       for(const em of ((this.model as any).emitters || [])){
         if(em.updateType === 'Lightning'){
           if(this.targetTracker) em.referenceNode = this.targetTracker;
-          em._lightningDelay = em.lightningDelay || 0;
           // Safety net: if the deterministic load-time bind was bypassed (e.g. the emitter list was
           // rebuilt), re-resolve the texture once. Idempotent via the _texPending guard.
           const mat: any = em.material;

@@ -74,6 +74,32 @@ export class GameEffect {
     return;
   }
 
+  /**
+   * Duplicate this effect's wire-format state into a fresh instance of the same class. The
+   * engine COPIES a CGameEffect on every ApplyEffectToObject — a script's effect variable is
+   * a template, not a live handle — so re-applying one effect value to several targets (e.g.
+   * the k_sp1_generic AOE loop applying EffectBeam + EffectDamage per victim) must not
+   * re-point the already-attached instance at the next target.
+   */
+  clone(): GameEffect {
+    const copy = new (this.constructor as any)() as GameEffect;
+    copy.type = this.type;
+    copy.subType = this.subType;
+    copy.duration = this.duration;
+    copy.expireDay = this.expireDay;
+    copy.expireTime = this.expireTime;
+    copy.spellId = this.spellId;
+    copy.skipOnLoad = this.skipOnLoad;
+    copy.creator = this.creator;
+    copy.numIntegers = this.numIntegers;
+    copy.intList = this.intList.slice();
+    copy.floatList = this.floatList.slice();
+    copy.stringList = this.stringList.slice();
+    copy.objectList = this.objectList.slice();
+    copy.initialize();
+    return copy;
+  }
+
   setCreator(oCreator: ModuleObject){
     this.creator = oCreator;
   }

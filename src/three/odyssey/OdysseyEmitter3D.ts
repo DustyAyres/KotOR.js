@@ -88,6 +88,48 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
   lightningSubDiv: number = 0;
   _lightningDelay: number = 0;
 
+  /**
+   * Lightning runtime state, mirroring the engine's LightningEmitter (swkotor2.exe
+   * FUN_004fe770 Update / FUN_004fd050 RandomizeControlPoints / FUN_004fbed0 SpawnBranches).
+   * The bolt is a two-level curve: a COARSE cubic-Bezier spline through
+   * trunc(dist*controlPTCount+0.5)+2 control points with randomized tangents (re-rolled every
+   * controlPTDelay seconds, cross-faded old->new when controlPTSmoothing), and FINE points
+   * sampled on that spline plus a per-point jitter offset array (re-rolled every
+   * lightningDelay seconds). Between rebuilds the geometry follows the endpoints rather than
+   * re-randomizing. Both timers start expired (engine inits them to 10000) so the first tick
+   * builds immediately.
+   */
+  private _lxTimerFine: number = 10000;
+  private _lxTimerCoarse: number = 10000;
+  private _lxCoarseOldP: THREE.Vector3[] = [];
+  private _lxCoarseNewP: THREE.Vector3[] = [];
+  private _lxCoarseOldT: THREE.Vector3[] = [];
+  private _lxCoarseNewT: THREE.Vector3[] = [];
+  private _lxFineBase: THREE.Vector3[] = [];
+  private _lxFineOffset: THREE.Vector3[] = [];
+  private _lxPrevStart: THREE.Vector3 = new THREE.Vector3();
+  private _lxPrevEnd: THREE.Vector3 = new THREE.Vector3();
+  private _lxBranches: {
+    /** parent fine-point index the branch roots at (= trunc(parentCount * f), so small
+     * branches anchor near the caster — engine FUN_004fbed0 @ 0x4fc075) */
+    attachIndex: number;
+    /** branch far endpoint relative to the attach point (world delta) */
+    endRel: THREE.Vector3;
+    /** the child's base perpendicular — what makes lightningRadius/zigzag jitter ACT on a
+     * branch (no-op on the root bolt). SHORT branches get the constant (0,0,-1) (the engine
+     * computes normalize(ctrl[1]-ctrl[1]) — a compiler quirk that collapses to the normalize
+     * fallback); LONG branches never write it and keep the zeroed ctor value. */
+    basePerp: THREE.Vector3;
+    /** shared random factor f in [0.1, 0.89]: scales the six size controllers AND picks the
+     * anchor index */
+    sizeScale: number;
+    /** fine point count = branchLen * lightningSubDiv + 2 (engine FUN_004fbed0) */
+    count: number;
+    /** far-endpoint jitter: 0 for short branches, the parent's targetSize for long ones */
+    targetSize: number;
+    offsets: THREE.Vector3[];
+  }[] = [];
+
   // Velocity calculation cache
   d: number = 0;
   vx: number = 0;
@@ -506,7 +548,11 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
           this.geometry.setAttribute( 'offset', this.velocities );
           this.geometry.setAttribute( 'props', this.props );
           this.geometry.setAttribute( 'ids', this.ids );
-          
+          if(this.updateType == 'Lightning'){
+            //Baked per-segment RGBA consumed by the shader's LIGHTNING branch (see tickLightning).
+            this.geometry.setAttribute( 'pColor', new THREE.BufferAttribute( new Float32Array( [] ), 4 ).setUsage( THREE.DynamicDrawUsage ) );
+          }
+
           this.mesh = new THREE.Mesh( this.geometry, this.material );
         break;
         default:
@@ -1099,158 +1145,447 @@ export class OdysseyEmitter3D extends OdysseyObject3D {
     }
   }
 
-  tickLightning(delta: number = 0){
-    if(this._lightningDelay === undefined){
-      this._lightningDelay = 0.00;
-    }
+  private static readonly _v3ZERO = new THREE.Vector3();
 
-    let lightningZigZag = this.lightningZigZag + 1;
+  /**
+   * Author the lightning bolt for this frame, mirroring the engine's LightningEmitter
+   * (swkotor2.exe FUN_004fe770 Update / FUN_004fd050 RandomizeControlPoints /
+   * FUN_004fbed0 SpawnBranches / FUN_004f5f50 ribbon renderer):
+   *  - a COARSE cubic-Bezier spline through trunc(dist*controlPTCount+0.5)+2 control points
+   *    with randomized tangents, re-rolled every controlPTDelay seconds and cross-faded
+   *    old->new when the MDL authors controlPTSmoothing (the bolt MORPHS between shapes);
+   *  - FINE points sampled along that spline plus a per-point jitter offset array re-rolled
+   *    every lightningDelay seconds (the flicker cadence is AUTHORED per strand, not the
+   *    display frame rate);
+   *  - rigid endpoint-follow between rebuilds (moving actors don't retrigger randomization);
+   *  - branch fork bolts (rand()%(branchCount+1) per coarse cycle);
+   *  - camera-plane-facing connected quad ribbon with per-segment width/color/alpha
+   *    interpolated along the bolt (t = segment/count, engine render style 6) and one full
+   *    texture cell per segment.
+   */
+  tickLightning(delta: number = 0){
     const start = OdysseyEmitter3D._v3A.set(0, 0, 0);
     this.getWorldPosition(start);
-    const target = OdysseyEmitter3D._v3B.set(0, 0, 0);
-    this.referenceNode.getWorldPosition(target);
+    const end = OdysseyEmitter3D._v3B.set(0, 0, 0);
+    this.referenceNode.getWorldPosition(end);
 
-    // Bolt width from the authored emitter size (SizeStart / XSize), not a hard-coded constant.
-    // A lightning model carries several strands with different sizes -> layered thin+thick bolts
-    // like vanilla, instead of one uniform fat band.
-    let scale = Math.max(this.sizes[0] || 0, this.size.x || 0, 0.05) * 2.0;
+    const boltLen = start.distanceTo(end);
+    const axisDir = new THREE.Vector3().subVectors(end, start);
+    if(axisDir.lengthSq() < 1e-8) axisDir.set(0, 0, 1); else axisDir.normalize();
 
-    let gridX1 = 2;
-    let indices: number[] = [];
-    let vertices: number[] = [];
-    let normals: number[] = [];
-    let uvs: number[] = [];
-    let velocities: number[] = [];
-    let props: number[] = [];
-    let spread = (this.lightningScale || 0);
-    let age = 0;
+    this._lxTimerFine += delta;
+    this._lxTimerCoarse += delta;
 
-    if(this._lightningDelay >= this.lightningDelay){
-      if(this.parent && (this.parent.quaternion.x || this.parent.quaternion.y || this.parent.quaternion.z || this.parent.quaternion.w != 1))
-        this.parent.quaternion.set(0, 0, 0, 1);
+    const smoothing = !!(this.node && this.node.controlPTSmoothing);
 
-      this._lightningDelay = 0;
-
-      // Ribbon orientation: present the strip's full width to the camera by offsetting each segment
-      // perpendicular to BOTH the bolt axis and the view direction. The old code offset along world
-      // X, which went edge-on (invisibly thin) whenever the bolt ran along X or the camera looked
-      // down it. Fall back to a world-up perpendicular when there's no camera/context.
-      const boltDir = new THREE.Vector3().subVectors(target, start);
-      if(boltDir.lengthSq() < 1e-8) boltDir.set(0, 0, 1);
-      boltDir.normalize();
-      const cam = this.context?.currentCamera as THREE.Camera | undefined;
-      const camPos = new THREE.Vector3();
-      const hasCam = !!cam;
-      if(cam) cam.getWorldPosition(camPos);
-      const halfWidth = scale * 0.5;
-      const segCount = Math.max(1, lightningZigZag - 1);
-      const pPoint = new THREE.Vector3();
-      const perp = new THREE.Vector3();
-      const viewDir = new THREE.Vector3();
-      const worldUp = new THREE.Vector3(0, 0, 1);
-
-      for(let iy = 0; iy < lightningZigZag; iy++){
-        // Reach a full 1.0 at the last point so the bolt actually lands on the target — the old
-        // iy/lightningZigZag stopped one segment short, so the arc never quite touched the victim.
-        let percentage = iy/segCount;
-        let x = start.x + ( (target.x - start.x) * percentage);
-        let y = start.y + ( (target.y - start.y) * percentage);
-        let z = start.z + ( (target.z - start.z) * percentage);
-
-        if(iy === 0){
-          // First vertex: keep at start position (the caster's hand)
-        }else if(iy + 1 === lightningZigZag){
-          x = this.randomFloat(x, this.lightningRadius);
-          y = this.randomFloat(y, this.lightningRadius);
-          z = this.randomFloat(z, this.lightningRadius);
-        }else{
-          x = this.randomFloat(x, spread);
-          y = this.randomFloat(y, spread);
-          z = this.randomFloat(z, spread);
-        }
-
-        // Camera-facing perpendicular for this centreline point.
-        pPoint.set(x, y, z);
-        if(hasCam){
-          viewDir.subVectors(camPos, pPoint);
-          perp.crossVectors(boltDir, viewDir);
-        }else{
-          perp.crossVectors(boltDir, worldUp);
-        }
-        if(perp.lengthSq() < 1e-8) perp.set(1, 0, 0);
-        perp.normalize().multiplyScalar(halfWidth);
-
-        for ( let ix = 0; ix < 2; ix ++ ) {
-          const sgn = ix === 0 ? 1 : -1;
-
-          // World-space vert: the LIGHTNING shader renders `position` directly through viewMatrix
-          // only (no model matrix), so these must be true world coords (Y as-is — negating it
-          // mirrored the bolt across y=0, off-screen wherever world Y != 0).
-          vertices.push( x + perp.x*sgn, y + perp.y*sgn, z + perp.z*sgn );
-          normals.push( 0, 0, 1 );
-          uvs.push( ix / 1 );
-          uvs.push( 1 - ( iy / (lightningZigZag-1) ) );
-
-          velocities.push(0, 0, 0, 0);
-
-          if(!this.geometry.attributes.props){
-            age = 0;
-          }else{
-            age = ((this.geometry.attributes.props as THREE.BufferAttribute).getX( 0 ) || 0) + delta;
-          }
-
-          if(age >= 1)
-            age = 0;
-
-          props.push(age, 1, 1, 0);
-        }
-      }
-
-      // Index and geometry building AFTER the vertex loop
-      for(let iy2 = 0; iy2 < lightningZigZag-1; iy2++){
-        for ( let ix = 0; ix < 1; ix++ ) {
-          let a = ix + gridX1 * iy2;
-          let b = ix + gridX1 * ( iy2 + 1 );
-          let c = ( ix + 1 ) + gridX1 * ( iy2 + 1 );
-          let d = ( ix + 1 ) + gridX1 * iy2;
-          indices.push( a, b, d );
-          indices.push( b, c, d );
-        }
-      }
-
-      this.geometry.setIndex(indices);
-      this.geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( vertices, 3 ) );
-      this.geometry.setAttribute( 'offset', new THREE.Float32BufferAttribute( velocities, 4 ) );
-      this.geometry.setAttribute( 'props', new THREE.Float32BufferAttribute( props, 4 ) );
-      this.geometry.setAttribute( 'normal', new THREE.Float32BufferAttribute( normals, 3 ) );
-      this.geometry.setAttribute( 'uv', new THREE.Float32BufferAttribute( uvs, 2 ) );
-
-      // Update references to newly created attributes
-      this.velocities = this.geometry.getAttribute('offset') as THREE.BufferAttribute;
-      this.props = this.geometry.getAttribute('props') as THREE.BufferAttribute;
-
-      if(this.geometry.boundingSphere)
-        this.geometry.boundingSphere.radius = start.distanceTo(target);
-
-    }else{
-      this._lightningDelay += delta;
-      for(let iy = 0; iy < lightningZigZag; iy++){
-        for ( let ix = 0; ix < 2; ix++ ) {
-          if(!this.geometry.attributes.props){
-            age = 0;
-          }else{
-            age = ((this.geometry.attributes.props as THREE.BufferAttribute).getX( 0 ) || 0) + delta;
-          }
-
-          if(age >= 1)
-            age = 0;
-
-          props.push(age, 1, 1, 0);
-        }
-      }
-      this.geometry.setAttribute( 'props', new THREE.Float32BufferAttribute( props, 4 ) );
-      this.props = this.geometry.getAttribute('props') as THREE.BufferAttribute;
+    //---- COARSE spline re-roll (controlPTDelay cadence) ----------------------
+    let fineRebuild = this._lxTimerFine > this.lightningDelay;
+    if(this._lxTimerCoarse > this.controlPTDelay){
+      this._lxTimerCoarse = 0;
+      this.lxRandomizeCoarse(start, end, axisDir);
+      this.lxSpawnBranches(start, end, axisDir, boltLen);
+      //the engine forces the fine layer to re-roll together with the coarse one
+      fineRebuild = true;
     }
+
+    //---- FINE layer ----------------------------------------------------------
+    const fineCount = this.getLightningPointCount(boltLen);
+    const phase = smoothing ? Math.min(this._lxTimerCoarse / Math.max(this.controlPTDelay, 1e-6), 1) : 1;
+
+    if(fineRebuild){
+      this._lxTimerFine = 0;
+      this.lxSampleSpline(this._lxFineBase, fineCount, phase, start, end);
+      this._lxFineOffset = this.lxRollOffsets(fineCount, boltLen, axisDir, null);
+      //far-endpoint landing jitter: ±targetSize/2 per axis, re-rolled per fine rebuild
+      if(this.targetSize > 0){
+        this._lxFineOffset[fineCount - 1].set(
+          (Math.random() - 0.5) * this.targetSize,
+          (Math.random() - 0.5) * this.targetSize,
+          (Math.random() - 0.5) * this.targetSize
+        );
+      }
+      //branches re-roll their jitter on the same fine cadence (long branches inherit the
+      //parent's targetSize endpoint jitter; short ones have none)
+      for(const br of this._lxBranches){
+        const bDir = br.endRel.lengthSq() > 1e-9 ? br.endRel.clone().normalize() : axisDir;
+        br.offsets = this.lxRollOffsets(br.count, br.endRel.length(), bDir, br.basePerp);
+        if(br.targetSize > 0){
+          br.offsets[br.count - 1].set(
+            (Math.random() - 0.5) * br.targetSize,
+            (Math.random() - 0.5) * br.targetSize,
+            (Math.random() - 0.5) * br.targetSize
+          );
+        }
+      }
+    }else if(smoothing){
+      //cross-fade the coarse spline old->new every frame (authored controlPTSmoothing)
+      this.lxSampleSpline(this._lxFineBase, fineCount, phase, start, end);
+    }else{
+      //rigid-follow: rotate the existing shape from the previous emitter->target direction
+      //onto the current one and re-anchor it at the emitter (engine follow block)
+      const prevDir = OdysseyEmitter3D._v3C.subVectors(this._lxPrevEnd, this._lxPrevStart);
+      if(prevDir.lengthSq() > 1e-8 && this._lxFineBase.length){
+        prevDir.normalize();
+        const q = new THREE.Quaternion().setFromUnitVectors(prevDir, axisDir);
+        for(const pt of this._lxFineBase){
+          pt.sub(this._lxPrevStart).applyQuaternion(q).add(start);
+        }
+      }
+    }
+    this._lxPrevStart.copy(start);
+    this._lxPrevEnd.copy(end);
+
+    this.lxAuthorGeometry(delta);
+  }
+
+  /**
+   * Fine bolt point count = trunc(distance * lightningSubDiv + 2). PartEmitter::Update
+   * (FUN_004ec080 @ 0x4ec3c8) overwrites the birthrate slot with exactly this every frame for
+   * lightning emitters (gated on the AsLightning() virtual) — the authored birthRate is
+   * irrelevant for bolts, and subDiv is the bolt's points-per-METER density.
+   */
+  private getLightningPointCount(len: number){
+    return Math.max(2, Math.min(Math.trunc(len * this.lightningSubDiv + 2), OdysseyEmitter3D.LINKED_MAX_SAMPLES));
+  }
+
+  /** Re-randomize the coarse Bezier control points/tangents (engine FUN_004fd050). */
+  private lxRandomizeCoarse(start: THREE.Vector3, end: THREE.Vector3, axisDir: THREE.Vector3){
+    const dist = start.distanceTo(end);
+    const count = Math.max(2, Math.floor(dist * this.controlPTCount + 0.5) + 2);
+
+    //age the current set so smoothing can cross-fade old->new
+    this._lxCoarseOldP = this._lxCoarseNewP;
+    this._lxCoarseOldT = this._lxCoarseNewT;
+
+    //T[0] = the emitter node's local +Z * tangentLength. EffectBeam aims the beam model's +Z
+    //at the target, so each strand's authored node orientation tilts its exit tangent — this
+    //is what fans the multi-strand beams (v_lightnx_dur) apart at the caster's hand.
+    const q = new THREE.Quaternion();
+    this.getWorldQuaternion(q);
+    const t0 = new THREE.Vector3(0, 0, 1).applyQuaternion(q).multiplyScalar(this.tangentLength);
+
+    const P: THREE.Vector3[] = [];
+    const T: THREE.Vector3[] = [];
+    for(let i = 0; i < count; i++){
+      //Interior control points get a radial ±controlPTRadius offset in the engine, rotated
+      //around the axis from the emitter's base perpendicular — which is ZERO on the root
+      //emitter (the ctor never writes it), so root control points stay on the chord. Only
+      //branch bolts would get radial coarse offsets (ours are simplified — lxSpawnBranches).
+      P.push(new THREE.Vector3().lerpVectors(start, end, count > 1 ? i / (count - 1) : 0));
+      let t: THREE.Vector3;
+      if(i == 0){
+        t = t0.clone();
+      }else{
+        t = axisDir.clone().multiplyScalar(this.tangentLength);
+        if(i < count - 1){
+          //interior tangents: random two-axis tilt of up to ±tangentSpread degrees
+          t.applyEuler(new THREE.Euler(
+            THREE.MathUtils.degToRad((Math.random() * 2 - 1) * this.tangentSpread),
+            THREE.MathUtils.degToRad((Math.random() * 2 - 1) * this.tangentSpread),
+            0
+          ));
+        }
+      }
+      T.push(t);
+    }
+    this._lxCoarseNewP = P;
+    this._lxCoarseNewT = T;
+    if(!this._lxCoarseOldP.length){
+      this._lxCoarseOldP = P.map(v => v.clone());
+      this._lxCoarseOldT = T.map(v => v.clone());
+    }
+  }
+
+  /**
+   * Sample the coarse spline into `out` as `count` fine base positions, cross-faded old->new
+   * by `phase` (1 = fully new). Cubic Bezier per coarse segment:
+   * B = (1-u)^3 P0 + 3u(1-u)^2 (P0+T0) + 3u^2(1-u) (P1-T1) + u^3 P1 (engine morph block).
+   * The outermost control points are pinned to the live start/end so the bolt tracks moving
+   * actors between coarse rebuilds.
+   */
+  private lxSampleSpline(out: THREE.Vector3[], count: number, phase: number, start: THREE.Vector3, end: THREE.Vector3){
+    const newP = this._lxCoarseNewP, newT = this._lxCoarseNewT;
+    const oldP = this._lxCoarseOldP.length == newP.length ? this._lxCoarseOldP : newP;
+    const oldT = this._lxCoarseOldT.length == newT.length ? this._lxCoarseOldT : newT;
+    const cc = newP.length;
+    out.length = 0;
+    if(cc < 2){
+      for(let i = 0; i < count; i++) out.push(new THREE.Vector3().lerpVectors(start, end, count > 1 ? i / (count - 1) : 0));
+      return;
+    }
+    const P0 = new THREE.Vector3(), P1 = new THREE.Vector3(), T0 = new THREE.Vector3(), T1 = new THREE.Vector3();
+    const C0 = new THREE.Vector3(), C1 = new THREE.Vector3();
+    for(let i = 0; i < count; i++){
+      const s = count > 1 ? i / (count - 1) : 0;
+      const f = s * (cc - 1);
+      const seg = Math.min(Math.floor(f), cc - 2);
+      const u = f - seg;
+      P0.copy(oldP[seg]).lerp(newP[seg], phase);
+      P1.copy(oldP[seg + 1]).lerp(newP[seg + 1], phase);
+      T0.copy(oldT[seg]).lerp(newT[seg], phase);
+      T1.copy(oldT[seg + 1]).lerp(newT[seg + 1], phase);
+      if(seg == 0) P0.copy(start);
+      if(seg == cc - 2) P1.copy(end);
+      C0.copy(P0).add(T0);
+      C1.copy(P1).sub(T1);
+      const w0 = (1 - u) * (1 - u) * (1 - u), w1 = 3 * u * (1 - u) * (1 - u), w2 = 3 * u * u * (1 - u), w3 = u * u * u;
+      out.push(new THREE.Vector3(
+        P0.x * w0 + C0.x * w1 + C1.x * w2 + P1.x * w3,
+        P0.y * w0 + C0.y * w1 + C1.y * w2 + P1.y * w3,
+        P0.z * w0 + C0.z * w1 + C1.z * w2 + P1.z * w3
+      ));
+    }
+  }
+
+  /**
+   * Roll the per-point jitter offsets (engine fine-rebuild block): interior points get an
+   * along-axis component of ±rand*(lightningScale*(len/count)*0.5) plus a perpendicular
+   * component rand*(lightningRadius * triangular envelope 0->1->0) along a direction that
+   * rotates point-to-point around the axis by a random step of up to lightningZigZag DEGREES
+   * (zigzag is an angle, not a segment count). basePerp is zero on the root bolt — radius is
+   * a no-op there; branches pass their seeded perpendicular, which is where radius/zigzag act.
+   */
+  private lxRollOffsets(count: number, boltLen: number, axisDir: THREE.Vector3, basePerp: THREE.Vector3 | null){
+    const offsets: THREE.Vector3[] = [];
+    const alongMax = this.lightningScale * (count > 0 ? boltLen / count : 0) * 0.5;
+    const zigzagDeg = Math.max(1, Math.floor(this.lightningZigZag));
+    const perpDir = basePerp && basePerp.lengthSq() > 1e-9 ? basePerp.clone().normalize() : null;
+    for(let i = 0; i < count; i++){
+      const off = new THREE.Vector3();
+      if(i > 0 && i < count - 1){
+        off.addScaledVector(axisDir, (Math.random() < 0.5 ? -1 : 1) * Math.random() * alongMax);
+        if(perpDir){
+          let step = Math.random() * zigzagDeg;
+          if(Math.random() < 0.5) step = 360 - step;
+          perpDir.applyAxisAngle(axisDir, THREE.MathUtils.degToRad(step));
+          let env = i / count;
+          if(env > 0.5) env = 1 - env;
+          env *= 2;
+          off.addScaledVector(perpDir, Math.random() * this.lightningRadius * env);
+        }
+      }
+      offsets.push(off);
+    }
+    return offsets;
+  }
+
+  /**
+   * Spawn this coarse cycle's branch forks (engine FUN_004fbed0): the root spawns
+   * rand()%(branchCount+1) children. Each rolls ONE shared factor f in [0.1, 0.89] that both
+   * scales the six size controllers and picks the anchor: attachIndex = trunc(count * f) — so
+   * small branches root near the caster. f<=0.5 spawns a SHORT branch whose target sits
+   * FURTHER ALONG THE PARENT BOLT (anchor + boltVec*(0.25 + rand()%25/100) — plus a rotated
+   * parent-perp term that is zero on the root); f>0.5 spawns a LONG branch ending exactly at
+   * the parent's target (inheriting the parent's targetSize jitter). Branch point count =
+   * branchLen * lightningSubDiv + 2. Branch shape is simplified to a straight run + jitter
+   * (the engine gives children a full child emitter with their own control points).
+   */
+  private lxSpawnBranches(start: THREE.Vector3, end: THREE.Vector3, axisDir: THREE.Vector3, boltLen: number){
+    this._lxBranches = [];
+    const numBranches = (this.node ? this.node.branchCount : 0) || 0;
+    const fineCount = this.getLightningPointCount(boltLen);
+    if(numBranches <= 0 || fineCount < 3 || boltLen <= 1e-4) return;
+    const n = Math.floor(Math.random() * (numBranches + 1));
+    const boltVec = new THREE.Vector3().subVectors(end, start);
+    for(let b = 0; b < n; b++){
+      const f = 0.1 + Math.random() * 0.79;
+      const attachIndex = Math.min(Math.trunc(fineCount * f), fineCount - 1);
+      const attach = new THREE.Vector3().lerpVectors(start, end, attachIndex / (fineCount - 1));
+      let endPoint: THREE.Vector3;
+      let basePerp: THREE.Vector3;
+      let targetSize: number;
+      if(f <= 0.5){
+        //short branch: target = anchor + parentBoltVec * (0.25 + rand()%25/100); the extra
+        //rotated parent-perp*len term is zero on the root (parent basePerp never written)
+        endPoint = attach.clone().addScaledVector(boltVec, 0.25 + Math.random() * 0.25);
+        basePerp = new THREE.Vector3(0, 0, -1);
+        targetSize = 0;
+      }else{
+        //long branch: ends exactly at the parent's target; perp jitter stays a no-op
+        //(the child's base perpendicular is never written for this path)
+        endPoint = end.clone();
+        basePerp = new THREE.Vector3(0, 0, 0);
+        targetSize = this.targetSize;
+      }
+      const endRel = endPoint.sub(attach);
+      const branchLen = endRel.length();
+      if(branchLen < 1e-4) continue;
+      const count = Math.max(2, Math.min(Math.trunc(branchLen * this.lightningSubDiv + 2), OdysseyEmitter3D.LINKED_MAX_SAMPLES));
+      const bDir = endRel.clone().normalize();
+      this._lxBranches.push({
+        attachIndex, endRel, basePerp, sizeScale: f, count, targetSize,
+        offsets: this.lxRollOffsets(count, branchLen, bDir, basePerp),
+      });
+    }
+  }
+
+  /**
+   * Interpolate a start/mid/end triple along the bolt with t = i/count (NOT i/(count-1), so
+   * t < 1 always — engine render style 6). Exact decompiled branch structure of FUN_004f5f50:
+   * percentStart == 255 is a sentinel for a plain start->end lerp; otherwise the percent
+   * stops pick flat-start (t < pS), start->mid, mid->end, or flat-end (t >= pE). The shipped
+   * beam models author (0, 0, 1), which lands EVERY point in the mid->end branch with u = t —
+   * the Start keys are never used. Returns the raw lerped value; `lxLastInterpFlat` reports
+   * whether the flat start/end branch was taken (those skip the *0.5 in the engine's width
+   * math — a real engine quirk that doubles the ribbon width outside [pS, pE]).
+   */
+  private lxLastInterpFlat: boolean = false;
+  private lxInterp(vs: number, vm: number, ve: number, t: number){
+    this.lxLastInterpFlat = false;
+    if(this.percentStart == 255) return vs + (ve - vs) * t;
+    const pS = this.percentStart, pM = this.percentMid, pE = this.percentEnd;
+    if(t < pE){
+      if(t < pM){
+        if(t < pS){
+          this.lxLastInterpFlat = true;
+          return vs;
+        }
+        const u = (t - pS) / Math.max(pM - pS, 1e-6);
+        return vs + (vm - vs) * u;
+      }
+      const u = (t - pM) / Math.max(pE - pM, 1e-6);
+      return vm + (ve - vm) * u;
+    }
+    this.lxLastInterpFlat = true;
+    return ve;
+  }
+
+  /**
+   * Build the ribbon geometry from the current fine points + offsets (root bolt and branches):
+   * per-SEGMENT camera-plane-facing quads (segment direction projected onto the camera
+   * right/up plane), gapless via shared edge positions, width = 2*interp(size, t) (the ±offset
+   * magnitude IS the interp value), per-segment flat RGBA baked into the pColor attribute, and
+   * one full texture cell per segment.
+   */
+  private lxAuthorGeometry(delta: number){
+    const camera: THREE.Camera = this.context ? this.context.currentCamera : undefined;
+    const camQ = new THREE.Quaternion();
+    if(camera) camera.getWorldQuaternion(camQ);
+    const A = new THREE.Vector3(1, 0, 0).applyQuaternion(camQ); //camera right
+    const B = new THREE.Vector3(0, 1, 0).applyQuaternion(camQ); //camera up
+
+    const vertices: number[] = [];
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    const props: number[] = [];
+    const offsets4: number[] = [];
+    const normals: number[] = [];
+    const indices: number[] = [];
+
+    //sprite-frame clock (only meaningful for animated multi-cell sheets; fx_lightning is 1x1)
+    const propsAttr = this.geometry.attributes.props as THREE.BufferAttribute;
+    let age = ((propsAttr && propsAttr.count > 0 ? propsAttr.getX(0) : 0) || 0) + delta;
+    if(age >= 1) age = 0;
+
+    const delta3 = new THREE.Vector3(), side = new THREE.Vector3(), dirV = new THREE.Vector3();
+    const p = new THREE.Vector3(), pq = new THREE.Vector3();
+    const prevR = new THREE.Vector3(), prevL = new THREE.Vector3();
+
+    const authorStrand = (base: THREE.Vector3[], offs: THREE.Vector3[], sizeScale: number) => {
+      const count = base.length;
+      if(count < 2) return;
+      let havePrev = false;
+      for(let i = 0; i < count - 1; i++){
+        const t = i / count;
+        p.copy(base[i]).add(offs[i] || OdysseyEmitter3D._v3ZERO);
+        pq.copy(base[i + 1]).add(offs[i + 1] || OdysseyEmitter3D._v3ZERO);
+
+        //project the segment onto the camera plane (engine FUN_004f5f50 basis math)
+        delta3.subVectors(pq, p);
+        const a = delta3.dot(A), b = delta3.dot(B);
+        const n = Math.sqrt(a * a + b * b);
+        if(n <= 1e-5){
+          side.copy(A);
+          dirV.copy(B);
+        }else{
+          side.copy(A).multiplyScalar(b).addScaledVector(B, -a).divideScalar(n);
+          dirV.copy(B).multiplyScalar(b).addScaledVector(A, a).divideScalar(n);
+        }
+
+        //halfW = lerp*0.5 on interpolating paths; the flat start/end branches skip the *0.5
+        //(engine quirk — width doubles outside [pS, pE]). Quad spans P ± side*(2*halfW).
+        const sizeRaw = this.lxInterp(this.sizes[0], this.sizes[1], this.sizes[2], t) * sizeScale;
+        const halfW = this.lxLastInterpFlat ? sizeRaw : sizeRaw * 0.5;
+        //along-segment overlap extension = segDir * (0.5 * halfY); halfY defaults to halfW
+        //when no Y sizes are authored (a quarter of the full width)
+        const hasY = (this.sizesY[0] || this.sizesY[1] || this.sizesY[2]);
+        let halfY = halfW;
+        if(hasY){
+          const yRaw = this.lxInterp(this.sizesY[0], this.sizesY[1], this.sizesY[2], t) * sizeScale;
+          halfY = this.lxLastInterpFlat ? yRaw : yRaw * 0.5;
+        }
+        side.multiplyScalar(2 * halfW);
+        dirV.multiplyScalar(0.5 * halfY);
+
+        //flat per-segment RGBA (the engine packs one color for all four quad verts)
+        const r = THREE.MathUtils.clamp(this.lxInterp(this.colorStart.r, this.colorMid.r, this.colorEnd.r, t), 0, 1);
+        const g = THREE.MathUtils.clamp(this.lxInterp(this.colorStart.g, this.colorMid.g, this.colorEnd.g, t), 0, 1);
+        const bl = THREE.MathUtils.clamp(this.lxInterp(this.colorStart.b, this.colorMid.b, this.colorEnd.b, t), 0, 1);
+        const al = THREE.MathUtils.clamp(this.lxInterp(this.opacity[0], this.opacity[1], this.opacity[2], t), 0, 1);
+
+        //quad corners [P+, P-, Q+, Q-]; reuse the previous quad's far edge for a gapless ribbon
+        const vBase = vertices.length / 3;
+        if(havePrev){
+          vertices.push(prevR.x, prevR.y, prevR.z);
+          vertices.push(prevL.x, prevL.y, prevL.z);
+        }else{
+          vertices.push(p.x + side.x - dirV.x, p.y + side.y - dirV.y, p.z + side.z - dirV.z);
+          vertices.push(p.x - side.x - dirV.x, p.y - side.y - dirV.y, p.z - side.z - dirV.z);
+        }
+        prevR.set(pq.x + side.x + dirV.x, pq.y + side.y + dirV.y, pq.z + side.z + dirV.z);
+        prevL.set(pq.x - side.x + dirV.x, pq.y - side.y + dirV.y, pq.z - side.z + dirV.z);
+        vertices.push(prevR.x, prevR.y, prevR.z);
+        vertices.push(prevL.x, prevL.y, prevL.z);
+        havePrev = true;
+
+        //one full texture cell per segment: u across the width, v along the segment
+        uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+
+        for(let k = 0; k < 4; k++){
+          colors.push(r, g, bl, al);
+          props.push(age, 1, 1, 0);
+          offsets4.push(0, 0, 0, 0);
+          normals.push(0, 0, 1);
+        }
+
+        indices.push(vBase, vBase + 1, vBase + 2);
+        indices.push(vBase + 1, vBase + 3, vBase + 2);
+      }
+    };
+
+    //root bolt
+    authorStrand(this._lxFineBase, this._lxFineOffset, 1.0);
+
+    //branch forks, anchored to their live attach point on the root bolt (the engine anchors
+    //children at finePoint + jitterOffset of the anchor index)
+    const bBase: THREE.Vector3[] = [];
+    const bAttach = new THREE.Vector3();
+    for(const br of this._lxBranches){
+      const idx = Math.min(br.attachIndex, this._lxFineBase.length - 1);
+      const attach = this._lxFineBase[idx];
+      if(!attach) continue;
+      bAttach.copy(attach).add(this._lxFineOffset[idx] || OdysseyEmitter3D._v3ZERO);
+      bBase.length = 0;
+      for(let i = 0; i < br.count; i++){
+        bBase.push(new THREE.Vector3().copy(br.endRel).multiplyScalar(br.count > 1 ? i / (br.count - 1) : 0).add(bAttach));
+      }
+      authorStrand(bBase, br.offsets, br.sizeScale);
+    }
+
+    this.geometry.setIndex(indices);
+    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    this.geometry.setAttribute('offset', new THREE.Float32BufferAttribute(offsets4, 4));
+    this.geometry.setAttribute('props', new THREE.Float32BufferAttribute(props, 4));
+    this.geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    this.geometry.setAttribute('pColor', new THREE.Float32BufferAttribute(colors, 4));
+
+    //update references to the newly created attributes
+    this.velocities = this.geometry.getAttribute('offset') as THREE.BufferAttribute;
+    this.props = this.geometry.getAttribute('props') as THREE.BufferAttribute;
+
+    if(this.geometry.boundingSphere)
+      this.geometry.boundingSphere.radius = this._lxPrevStart.distanceTo(this._lxPrevEnd) * 1.5 + 1;
   }
 
   /**

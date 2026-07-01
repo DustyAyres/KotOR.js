@@ -66,7 +66,9 @@ export class OdysseyModelNodeEmitter extends OdysseyModelNode {
 
     //lightning
     this.branchCount = this.odysseyModel.mdlReader.readUInt32();
-    this.controlPTSmoothing = this.odysseyModel.mdlReader.readSingle();
+    // int/bool in the engine (swkotor2 emitter-def +0x60) — reading it as float32 turned the
+    // authored 1 into a denormal 1.4e-45, silently disabling coarse-spline morph smoothing.
+    this.controlPTSmoothing = this.odysseyModel.mdlReader.readUInt32();
 
     this.gridX = this.odysseyModel.mdlReader.readUInt32();
     this.gridY = this.odysseyModel.mdlReader.readUInt32();
