@@ -168,7 +168,7 @@ export class CombatAttackData {
    * @param isCritial - Whether the attack is a critical hit
    * @param feat - The feat that is being used for the attack
    */
-  calculateDamage(creature: ModuleCreature, isCritial: boolean = false, feat?: TalentFeat){
+  calculateDamage(creature: ModuleCreature, isCritial: boolean = false, feat?: TalentFeat, isOffHand: boolean = false){
     /**
      * Unarmed Strike
      */
@@ -192,22 +192,13 @@ export class CombatAttackData {
        * Power Attack / Power Blast damage (dump FUN_006abf70, power-attack mode byte
        * at stats+0x512): basic tier (mode 2) = +3, improved/master tier (mode 3) = +7,
        * crit-multiplied. Gated on the ACTIVE attack form (the feat selected for this
-       * round) — NOT passive feat ownership — and the tiers do NOT stack. The previous
-       * code added +5/+8/+10 and STACKED them (a master owner got +23) on passive
-       * getHasFeat; this matches the binary. K2 feat ids via CombatFeatType.
+       * round) — NOT passive feat ownership — and the tiers do NOT stack. Single source
+       * of truth: TalentFeat.getFormDamageBonus (was a duplicated feat-id switch).
        */
       if(feat){
-        switch(feat.id){
-          case CombatFeatType.POWER_ATTACK:
-          case CombatFeatType.POWER_BLAST:
-            this.damageList[DamageType.BASE].addDamage(3 * damageMultiplier);
-          break;
-          case CombatFeatType.IMPROVED_POWER_ATTACK:
-          case CombatFeatType.IMPROVED_POWER_BLAST:
-          case CombatFeatType.MASTER_POWER_ATTACK:
-          case CombatFeatType.MASTER_POWER_BLAST:
-            this.damageList[DamageType.BASE].addDamage(7 * damageMultiplier);
-          break;
+        const formDamage = feat.getFormDamageBonus();
+        if(formDamage > 0){
+          this.damageList[DamageType.BASE].addDamage(formDamage * damageMultiplier);
         }
       }
 
@@ -221,11 +212,13 @@ export class CombatAttackData {
         this.damageList[DamageType.BASE].addDamage(specBonus * damageMultiplier);
       }
 
-      // EffectDamageIncrease/Decrease (Force buffs, item/feat weapon-damage bonuses). Flat bonus
-      // (DAMAGE_BONUS_n = n), crit-multiplied like the other weapon-damage bonuses.
+      // EffectDamageIncrease/Decrease (Force buffs, item/feat weapon-damage bonuses). Flat
+      // bonus (DAMAGE_BONUS_n = n) added pre-mitigation but NOT crit-multiplied — the dump's
+      // damage assembler (FUN_006adec0 step 6) adds effect damage AFTER the crit
+      // multiplication of dice + flat weapon bonuses.
       const effectDamageBonus = creature.getDamageEffectBonus();
       if(effectDamageBonus){
-        this.damageList[DamageType.BASE].addDamage(effectDamageBonus * damageMultiplier);
+        this.damageList[DamageType.BASE].addDamage(effectDamageBonus);
       }
 
     }else{
@@ -235,9 +228,22 @@ export class CombatAttackData {
       }
     }
 
-    //Add strength MOD to melee damage
+    //STR mod on melee damage: full on the main hand, halved-if-positive on the off hand,
+    //and crit-multiplied like every flat weapon bonus (dump FUN_006abf70/FUN_006adec0:
+    //dice*mult + (STR + form + spec)*mult; the previous code skipped the crit multiplier).
     if(this.attackWeapon.getWeaponType() == WeaponType.PIERCING){
-      this.damageList[DamageType.PHYSICAL].addDamage( Math.floor(( creature.getSTR() - 10) / 2) );
+      let strMod = Math.floor((creature.getSTR() - 10) / 2);
+      if(isOffHand && strMod > 0){
+        strMod = Math.floor(strMod / 2);
+      }
+      this.damageList[DamageType.PHYSICAL].addDamage(strMod * damageMultiplier);
+    }
+
+    //The engine floors a landed attack's damage at 1 BEFORE mitigation (FUN_006adec0);
+    //mitigation then floors at 0. A heavily negative STR mod can otherwise zero the hit.
+    const preMitigationTotal = this.getTotalDamage();
+    if(preMitigationTotal < 1){
+      this.damageList[DamageType.BASE].addDamage(1 - preMitigationTotal);
     }
 
     if(this.getTotalDamage() >= this.reactObject.getHP()){

@@ -1435,7 +1435,17 @@ export class ModuleCreature extends ModuleObject {
     // scripted hits keep their literal damage.
     let activeFeat: TalentFeat | undefined;
     if(feat){
-      activeFeat = feat;
+      // The engine lapses a form to a normal attack when the equipped weapon's class doesn't
+      // match the form's feat.2da category (dump FUN_006b83f0 has-feat gate + the 0x1104
+      // melee / 0x1111 ranged category check — e.g. Sniper Shot auto-lapses after swapping
+      // to a melee weapon). The menu and the persistent stance already enforce this; the
+      // one-shot/scripted feat path was ungated, so a forced Power Blast with a melee weapon
+      // applied its modifiers.
+      const weaponType = this.getEquippedWeaponType();
+      const isFormFeat = feat.category == 0x1104 || feat.category == 0x1111;
+      const formValid = (feat.category == 0x1104 && weaponType == 1)
+        || (feat.category == 0x1111 && weaponType == 4);
+      activeFeat = (!isFormFeat || formValid) ? feat : undefined;
     }else if(!isCutsceneAttack){
       activeFeat = (GameState.getCurrentPlayer() == this)
         ? this.getValidCombatMode()
@@ -2789,14 +2799,16 @@ export class ModuleCreature extends ModuleObject {
 
     let dexBonus = Math.floor((this.getDEX() - 10) / 2);
 
-    // Active aggressive-form defense penalty: Flurry / Critical Strike (etc.) lower the
-    // attacker's AC while the stance is active. Applied on the read path via the
-    // persistent combat mode (replaces the leaky per-round EffectACDecrease).
-    let formACPenalty = this.getValidCombatMode()?.getArmorClassPenalty() || 0;
+    // NO attack-form defense penalty: the engine's Defense getter (swkotor2 FUN_006a5110)
+    // contains NO attack-feat term — the TSL manual's "Flurry/Critical Strike lower your
+    // Defense" is not implemented in the binary. K2 moved stance-based Defense modulation
+    // into the seven LIGHTSABER FORMS (CurrentForm 0x102-0x108: Shii-Cho +3 vs non-targets,
+    // Soresu +2 vs target, Ataru +3/-2, Shien -5 vs target, Niman +1, Juyo -2/-4), gated on
+    // a saber-class weapon — a separate unimplemented system.
 
     // EffectACIncrease/Decrease (Force Armor/Aura/Shield, item buffs). dexBonus already includes
     // EffectAbilityIncrease(DEX) via getDEX(), so DEX buffs also raise AC automatically.
-    return baseac + classBonus + armorAC + dexBonus - formACPenalty + this.getACEffectBonus();
+    return baseac + classBonus + armorAC + dexBonus + this.getACEffectBonus();
   }
 
   getSTR(calculateBonuses = true){

@@ -287,11 +287,15 @@ export class CharGenManager {
     creature.currentHitPoints = maxHP;
     creature.hitPoints = maxHP;
 
-    // Saving throws = class base (by level) + ability modifier. Fort↔CON, Ref↔DEX, Will↔WIS.
+    // Saving throws store the CLASS BASE only (by level). The ability modifiers
+    // (Fort↔CON, Ref↔DEX, Will↔WIS) are added at ROLL time by ModuleObject.fortitude/
+    // reflex/willSave — baking them in here double-counted them for chargen PCs (UTC
+    // creatures store base-only values), making the PC save too often (e.g. always
+    // halving enemy Death Field).
     const st = Array.isArray(mainClass.savingThrows) ? mainClass.savingThrows[level - 1] : null;
-    creature.fortitudeSaveThrow = (st ? st.fortsave : 0) + mod(creature.getCON());
-    creature.reflexSaveThrow    = (st ? st.refsave  : 0) + mod(creature.getDEX());
-    creature.willSaveThrow      = (st ? st.willsave : 0) + mod(creature.getWIS());
+    creature.fortitudeSaveThrow = (st ? st.fortsave : 0);
+    creature.reflexSaveThrow    = (st ? st.refsave  : 0);
+    creature.willSaveThrow      = (st ? st.willsave : 0);
 
     // Force Points.
     const maxFP = CharGenManager.getMaxForcePoints(creature, mainClass, level);

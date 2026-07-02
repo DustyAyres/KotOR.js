@@ -185,26 +185,14 @@ export class TalentFeat extends TalentObject {
     return 1;
   }
 
+  /**
+   * Attack forms apply NO Defense/AC penalty in the K2 engine: the Defense getter
+   * (swkotor2 FUN_006a5110) sums armor/natural/shield/dex/dodge/effects/Total-Defense and
+   * the LIGHTSABER FORM (CurrentForm) modifier — it never reads the active attack feat.
+   * The TSL manual's "lowers your Defense" flavor text for Flurry/Critical Strike is not
+   * implemented in the binary. Kept as an explicit 0 so old callers stay truthful.
+   */
   getArmorClassPenalty(){
-    // this.id is the running game's feat.2da row; reference the (K2-correct) CombatFeatType enum so the right feat
-    // triggers. The raw numbers here were K1 ids and mis-mapped under K2 (28=POWER_ATTACK not CRITICAL_STRIKE,
-    // 51=WEAPON_SPEC_MELEE not MASTER_FLURRY, 21=IMPROVED_CONDITIONING not MASTER_RAPID_SHOT). Critical Strike's
-    // defense penalty (the dump traced to-hit/damage/threat, not AC) is preserved.
-    switch(this.id){
-      case CombatFeatType.FLURRY:                   // 11
-      case CombatFeatType.RAPID_SHOT:               // 30
-        return 4;
-      case CombatFeatType.IMPROVED_FLURRY:          // 91
-      case CombatFeatType.IMPROVED_RAPID_SHOT:      // 92
-        return 2;
-      case CombatFeatType.MASTER_FLURRY:            // 53 (was wrongly 51 = WEAPON_SPEC_MELEE_WEAPONS)
-      case CombatFeatType.MASTER_RAPID_SHOT:        // 26 (was wrongly 21 = IMPROVED_CONDITIONING)
-        return 1;
-      case CombatFeatType.CRITICAL_STRIKE:          // 8  (was wrongly 28 = POWER_ATTACK)
-      case CombatFeatType.IMPROVED_CRITICAL_STRIKE: // 19
-      case CombatFeatType.MASTER_CRITICAL_STRIKE:   // 81
-        return 5;
-    }
     return 0;
   }
 
@@ -237,9 +225,12 @@ export class TalentFeat extends TalentObject {
 
   /**
    * The active attack-form to-hit BONUS (dump FUN_006acec0). A few forms ADD to-hit
-   * instead of subtracting: Force Jump (0 / +2 / +4 by tier) and Sniper Shot (+4 all
-   * tiers). Sniper's +4 is weapon-gated in the binary, but Sniper is a ranged form only
-   * usable with a ranged weapon, so the gate is satisfied whenever it is the active form.
+   * instead of subtracting: Force Jump (0 / +2 / +4 by tier), Sniper Shot (+4 all
+   * tiers), and the Rapid Shot family (+1 all tiers — its raw penalties are -4/-2/-1,
+   * netting the retail -3/-1/0). Sniper's +4 and Rapid's +1 are weapon-gated in the
+   * binary (an untraced CSWSItem flag on the equipped ranged weapon), but both are
+   * ranged forms only usable with a ranged weapon, so the gate is satisfied whenever
+   * they are the active form.
    * @returns The to-hit bonus this form grants (0 for forms with none or a penalty).
    */
   getAttackToHitBonus(){
@@ -252,6 +243,10 @@ export class TalentFeat extends TalentObject {
       case CombatFeatType.IMPROVED_SNIPER_SHOT: // 20
       case CombatFeatType.MASTER_SNIPER_SHOT:   // 77
         return 4;
+      case CombatFeatType.RAPID_SHOT:           // 30
+      case CombatFeatType.IMPROVED_RAPID_SHOT:  // 92
+      case CombatFeatType.MASTER_RAPID_SHOT:    // 26
+        return 1;
     }
     return 0;
   }

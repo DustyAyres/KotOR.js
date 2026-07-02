@@ -180,17 +180,11 @@ export class CombatRound {
       }else if(this.action.actionType == CombatActionType.ATTACK_USE_FEAT){
         this.action.feat.impactCaster(owner);
         this.action.feat.impactTarget(this.action.target);
-        switch(this.action.featId){
-          case CombatFeatType.FLURRY:
-          case CombatFeatType.IMPROVED_FLURRY:
-          case CombatFeatType.MASTER_FLURRY:
-          case CombatFeatType.RAPID_SHOT:
-          case CombatFeatType.IMPROVED_RAPID_SHOT:
-          case CombatFeatType.MASTER_RAPID_SHOT:
-            if(owner.equipment.RIGHTHAND){
-              this.additionalAttacks += 1;
-            }
-          break;
+        // +1 on-hand attack while a Flurry / Rapid-Shot form is active (dump FUN_005905f0).
+        // Single source of truth: TalentFeat.getFormExtraAttacks — this used to be a
+        // duplicated feat-id switch that had to be kept in sync by hand.
+        if(owner.equipment.RIGHTHAND){
+          this.additionalAttacks += this.action.feat.getFormExtraAttacks();
         }
       }
 
@@ -656,7 +650,9 @@ export class CombatRound {
     // Critical hit: a hit whose natural roll falls in the (form-widened) crit threat
     // range AND is then CONFIRMED by a second 1d20 + to-hit also beating AC (dump). An
     // unconfirmed threat is just a normal hit. AssuredHit is not itself a crit. (The +4
-    // confirm for combat-mode 0x108 is not modelled.)
+    // confirm — and +1 attack — for LIGHTSABER FORM Juyo (CurrentForm 0x108, per the dump's
+    // FUN_006e0b10/FUN_005905f0) belong to the unimplemented saber-form system, not the
+    // attack feats; Soresu/Ataru also shift threat by ±1 there.)
     let isCritical = false;
     if(hit && !hasAssuredHit && naturalRoll != 1){
       const isThreat = this.isCritical(naturalRoll, weapon, combatAction.feat);
@@ -672,7 +668,7 @@ export class CombatRound {
       attack.reactObject = combatAction.target;
       attack.attackWeapon = weapon;
       attack.attackResult = combatAction.attackResult;
-      attack.calculateDamage(creature, isCritical, combatAction.feat);
+      attack.calculateDamage(creature, isCritical, combatAction.feat, isOffHand);
     }else{
       combatAction.attackResult = AttackResult.MISS;
       attack.reactObject = combatAction.target;
@@ -699,20 +695,11 @@ export class CombatRound {
   calculateRoundAnimations(creature: ModuleCreature, combatAction: CombatRoundAction){
     if(!combatAction) return;
 
-    let attackKey = creature.getCombatAnimationAttackType();
-    let weaponWield = creature.getCombatAnimationWeaponType();
-    let attackType = 1;
-
-    //Get random basic melee attack in combat with another melee creature that is targeting you
-    if(attackKey == 'm'){
-      if(this.engaged && !this.attacksIncludeKillingBlow()){
-        attackKey = 'c';
-        attackType = Math.round(Math.random()*4)+1;
-      }
-    }
-
-    this.action.animationName = attackKey+weaponWield+'a'+attackType;
-    this.action.twoDAAnimation = OdysseyModelAnimation.GetAnimation2DA(this.action.animationName);
+    //Dump-faithful swing selection (engine FUN_0076f300/FUN_0076f940): active forms play
+    //their dedicated f{w}a1-4 / b{w}a2-4 animations, duels play non-repeating c-swings,
+    //non-duel melee uses the g-series, monster-model targets the m-series. Previously this
+    //built attackKey+wield+'a1' with no feat input, so every form swung the generic clip.
+    combatAction.calculateAttackAnimation();
 
     if(combatAction.isCutsceneAttack){
 
