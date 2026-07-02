@@ -1,4 +1,5 @@
 import { GameState } from "@/GameState";
+import { EngineState } from "@/enums/engine/EngineState";
 import { IPCMessageType } from "@/enums/server/ipc/IPCMessageType";
 import { IPCMessageTypeSession } from "@/enums/server/ipc/IPCMessageTypeSession";
 import { IPCMessageTypeObject } from "@/enums/server/ipc/IPCMessageTypeObject";
@@ -24,6 +25,14 @@ interface IReplicatedObjectState {
   animKey: string;
   dead: boolean;
   openState: number;
+  hp: number;
+  combatState: boolean;
+}
+
+/** Object.State field ids (Object.State: objectId, field, value). */
+export enum CoopObjectStateField {
+  DoorOpenState = 0,
+  CombatState = 1,
 }
 
 const TICK_INTERVAL_MS = 100;
@@ -36,11 +45,13 @@ export class CoopHostReplicator {
   static #tickTimer = 0;
   /** Number of peers currently mirroring (replication only runs when > 0). */
   static #replicatingPeers: Set<number> = new Set();
+  static #lastPaused: boolean = false;
 
   static reset(){
     this.lastSent.clear();
     this.#replicatingPeers.clear();
     this.#tickTimer = 0;
+    this.#lastPaused = false;
   }
 
   static get active(): boolean {
@@ -106,7 +117,31 @@ export class CoopHostReplicator {
     this.#replicatingPeers.add(peerId);
     //Force a full state push on the next tick so the new client snaps current.
     this.lastSent.clear();
+    //Sync the pause state to the new client.
+    const paused = GameState.State == EngineState.PAUSED;
+    nm.session.send(peerId,
+      new IPCMessage(IPCMessageType.Session, IPCMessageTypeSession.SetPause).addInt(paused ? 1 : 0)
+    );
     console.log(`CoopHostReplicator: peer ${peerId} mirroring — replication started`);
+  }
+
+  /**
+   * Emitted from the CombatRound results loop: one attack resolved. Clients
+   * reproduce the cosmetics that HP/anim replication cannot (floaty damage/
+   * miss text, blaster bolts, impact SFX).
+   */
+  static onCombatAttack(attacker: ModuleObject, target: ModuleObject, result: number, damage: number, weaponSlot: number){
+    if(!this.active){ return; }
+    const nm = GameState.NetworkManager;
+    if(!nm?.session){ return; }
+    nm.session.broadcast(
+      new IPCMessage(IPCMessageType.Object, IPCMessageTypeObject.CombatEvent)
+        .addObjectId(attacker.id)
+        .addObjectId(target.id)
+        .addInt(result)
+        .addInt(damage)
+        .addInt(weaponSlot)
+    );
   }
 
   static onPeerLeft(peerId: number){
@@ -139,10 +174,19 @@ export class CoopHostReplicator {
     const nm = GameState.NetworkManager;
     if(!nm?.session){ return; }
 
+    //Synchronized pause: host EngineState is authoritative and replicates.
+    const paused = GameState.State == EngineState.PAUSED;
+    if(paused != this.#lastPaused){
+      this.#lastPaused = paused;
+      nm.session.broadcast(
+        new IPCMessage(IPCMessageType.Session, IPCMessageTypeSession.SetPause).addInt(paused ? 1 : 0)
+      );
+    }
+
     for(const obj of this.watchedObjects()){
       let last = this.lastSent.get(obj.id);
       if(!last){
-        last = { x: NaN, y: NaN, z: NaN, facing: NaN, animKey: '', dead: false, openState: -1 };
+        last = { x: NaN, y: NaN, z: NaN, facing: NaN, animKey: '', dead: false, openState: -1, hp: NaN, combatState: false };
         this.lastSent.set(obj.id, last);
       }
 
@@ -187,6 +231,28 @@ export class CoopHostReplicator {
                 .addObjectId(obj.id)
             );
           }
+        }
+
+        const hp = creature.getHP();
+        if(hp != last.hp){
+          last.hp = hp;
+          nm.session.broadcast(
+            new IPCMessage(IPCMessageType.Object, IPCMessageTypeObject.HP)
+              .addObjectId(obj.id)
+              .addInt(hp)
+              .addInt(creature.getMaxHP())
+          );
+        }
+
+        const combatState = !!creature.combatData?.combatState;
+        if(combatState != last.combatState){
+          last.combatState = combatState;
+          nm.session.broadcast(
+            new IPCMessage(IPCMessageType.Object, IPCMessageTypeObject.State)
+              .addObjectId(obj.id)
+              .addInt(CoopObjectStateField.CombatState)
+              .addInt(combatState ? 1 : 0)
+          );
         }
       }
 

@@ -1,5 +1,7 @@
 import { GameState } from "@/GameState";
 import { NetMode } from "@/enums/engine/NetMode";
+import { EngineState } from "@/enums/engine/EngineState";
+import { AutoPauseState } from "@/enums/engine/AutoPauseState";
 import { IPCMessageType } from "@/enums/server/ipc/IPCMessageType";
 import { IPCMessageTypeSession } from "@/enums/server/ipc/IPCMessageTypeSession";
 import { IPCMessageTypeCommand } from "@/enums/server/ipc/IPCMessageTypeCommand";
@@ -518,9 +520,70 @@ export class NetworkManager {
         this.processEventListener('slot-released', [forPeerId]);
         break;
       }
-      default:
-        // SetPause lands in phase 4.
+      case IPCMessageTypeSession.SetPause: {
+        const paused = !!msg.intAt(0);
+        if(this.isHost()){
+          //A client requested pause/unpause: any player pausing pauses for
+          //everyone (design §10). Route through the sanctioned API; the
+          //replicator broadcasts the resulting state change.
+          if(paused){
+            GameState.AutoPauseManager.SignalAutoPauseEvent(AutoPauseState.Generic);
+          }else{
+            GameState.AutoPauseManager.Unpause();
+          }
+        }else{
+          //Host state is authoritative.
+          GameState.State = paused ? EngineState.PAUSED : EngineState.RUNNING;
+        }
         break;
+      }
+      default:
+        break;
+    }
+  }
+
+  /** Client: ask the host to pause/unpause the shared session. */
+  static requestPause(paused: boolean): void {
+    if(!this.isClient()){ return; }
+    this.session?.sendToHost(
+      new IPCMessage(IPCMessageType.Session, IPCMessageTypeSession.SetPause).addInt(paused ? 1 : 0)
+    );
+  }
+
+  /**
+   * Client: a click-interaction with a world object — route the intent to the
+   * host as a Command for our claimed member. Conversations are blocked
+   * client-side ('only the party leader can speak to them').
+   */
+  static clientInteract(obj: any): void {
+    if(!this.isClient() || !this.controlledCreature){ return; }
+    const hostId = CoopClientMirror.hostIdFor(obj);
+    if(hostId < 0){ return; }
+
+    const isDoor = typeof obj.setOpenState === 'function' && typeof obj.openDoor === 'function';
+    const isCreature = !!obj.combatData;
+    if(isCreature){
+      if(!obj.isDead() && obj.isHostile(this.controlledCreature)){
+        this.session?.sendToHost(
+          new IPCMessage(IPCMessageType.Command, IPCMessageTypeCommand.Attack).addObjectId(hostId)
+        );
+        return;
+      }
+      if(obj.isDead()){
+        this.session?.sendToHost(
+          new IPCMessage(IPCMessageType.Command, IPCMessageTypeCommand.UseObject).addObjectId(hostId)
+        );
+        return;
+      }
+      //Friendly creature: conversations are host-only (design §7).
+      this.processEventListener('dialog-blocked', [obj]);
+      console.log('NetworkManager: conversations are host-only — blocked');
+      return;
+    }
+    if(isDoor || obj){
+      this.session?.sendToHost(
+        new IPCMessage(IPCMessageType.Command, IPCMessageTypeCommand.UseObject).addObjectId(hostId)
+      );
     }
   }
 

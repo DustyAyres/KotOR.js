@@ -2,6 +2,7 @@ import { GameState } from "@/GameState";
 import type { INIConfig } from "@/engine/INIConfig";
 import { AutoPauseState } from "@/enums/engine/AutoPauseState";
 import { EngineState } from "@/enums/engine/EngineState";
+import { NetMode } from "@/enums/engine/NetMode";
 
 /**
  * AutoPauseManager class.
@@ -66,6 +67,13 @@ export class AutoPauseManager {
   static SignalAutoPauseEvent(type: AutoPauseState){
     if(!this.GetAutoPauseTypeEnabled(type)) return false;
 
+    //Co-op client: pause is host-authoritative — forward the request; the
+    //host's state change replicates back (synchronized pause, design §10).
+    if(GameState.netMode == NetMode.CLIENT){
+      GameState.NetworkManager?.requestPause(true);
+      return true;
+    }
+
     GameState.State = EngineState.PAUSED;
     GameState.MenuManager.InGamePause.LBL_PAUSEREASON.setText(this.AutoPauseReason.get(type));
     // MenuManager.InGamePause.LBL_PRESS.setText(this.AutoPauseMessages.get(type));
@@ -78,6 +86,10 @@ export class AutoPauseManager {
   }
 
   static Unpause(){
+    if(GameState.netMode == NetMode.CLIENT){
+      GameState.NetworkManager?.requestPause(false);
+      return;
+    }
     GameState.State = EngineState.RUNNING;
   }
 

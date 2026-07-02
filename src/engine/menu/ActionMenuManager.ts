@@ -5,6 +5,7 @@ import type { ModuleObject } from "@/module/ModuleObject";
 import type { ModuleCreature } from "@/module/ModuleCreature";
 import { IActionPanelLists } from "@/interface/gui/IActionPanelLists";
 import { GameEngineType } from "@/enums/engine/GameEngineType";
+import { NetMode } from "@/enums/engine/NetMode";
 import { ActionType } from "@/enums/actions/ActionType";
 import { SkillType } from "@/enums/nwscript/SkillType";
 import { ActionParameterType, ModuleObjectConstant, ModuleTriggerType } from "@/enums";
@@ -329,6 +330,14 @@ export class ActionMenuManager {
 
     const action = ActionMenuManager.ActionPanels.targetPanels[index].getSelectedAction();
     if(action){
+      //Co-op client: the sim is host-side; route the basic attack as a
+      //Command (talents/special actions land in a later phase).
+      if(GameState.netMode == NetMode.CLIENT){
+        if(action.target){
+          GameState.NetworkManager.clientInteract(action.target);
+        }
+        return;
+      }
       if(index==0){
         if(action.action && action.action.type == ActionType.ActionPhysicalAttacks){
           // Basic Attack clears any active combat-mode stance, then attacks plainly.

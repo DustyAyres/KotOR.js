@@ -1,5 +1,6 @@
 import { GameState } from "@/GameState";
 import { EngineMode } from "@/enums/engine/EngineMode";
+import { NetMode } from "@/enums/engine/NetMode";
 import { GameMenu, LBL_MapView } from "@/gui";
 import type { GUILabel, GUIButton, GUICheckBox, GUIProgressBar } from "@/gui";
 import { TextureLoader } from "@/loaders";
@@ -935,7 +936,8 @@ export class InGameOverlay extends GameMenu {
 
     if (GameState.module.area.miniGame) { return; }
 
-    const oPC = GameState.getCurrentPlayer();
+    //Co-op client: the HUD/action menu acts for the locally claimed member
+    const oPC = GameState.getLocalControlledCreature();
     GameState.ActionMenuManager.SetPC(oPC);
     GameState.ActionMenuManager.SetTarget(GameState.CursorManager.selectedObject);
     GameState.ActionMenuManager.UpdateMenuActions();
@@ -1053,7 +1055,10 @@ export class InGameOverlay extends GameMenu {
 
   triggerControllerAPress() {
     if (GameState.CursorManager.selectedObject) {
-      if (typeof GameState.CursorManager.selectedObject.onClick === 'function') {
+      if (GameState.netMode == NetMode.CLIENT) {
+        //Co-op client: interactions route to the host as Commands
+        GameState.NetworkManager.clientInteract(GameState.CursorManager.selectedObject);
+      } else if (typeof GameState.CursorManager.selectedObject.onClick === 'function') {
         GameState.getCurrentPlayer().clearAllActions();
         GameState.CursorManager.selectedObject.onClick(GameState.getCurrentPlayer());
       } else {

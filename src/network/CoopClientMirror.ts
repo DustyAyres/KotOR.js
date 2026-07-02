@@ -8,6 +8,11 @@ import { IPCMessage } from "@/server/ipc/IPCMessage";
 import { GFFObject } from "@/resource/GFFObject";
 import { CurrentGame } from "@/engine/CurrentGame";
 import { OdysseyModelAnimation } from "@/odyssey";
+import { AttackResult } from "@/enums/combat/AttackResult";
+import { TextSprite3DType } from "@/enums/engine/TextSprite3DType";
+import { TextSprite3D } from "@/engine/TextSprite3D";
+import { WeaponProjectile } from "@/combat/WeaponProjectile";
+import { CoopObjectStateField } from "@/network/CoopHostReplicator";
 import type { ModuleObject, ModuleCreature, ModuleDoor } from "@/module";
 
 /**
@@ -40,6 +45,8 @@ export class CoopClientMirror {
 
   /** host object id -> local object */
   static objects: Map<number, ModuleObject> = new Map();
+  /** local object -> host object id (for outgoing Commands) */
+  static hostIds: Map<ModuleObject, number> = new Map();
   static targets: Map<number, ITransformTarget> = new Map();
   static partyMembers: IPendingPartyMember[] = [];
   static loading = false;
@@ -47,10 +54,16 @@ export class CoopClientMirror {
 
   static reset(){
     this.objects.clear();
+    this.hostIds.clear();
     this.targets.clear();
     this.partyMembers = [];
     this.loading = false;
     this.ready = false;
+  }
+
+  /** Resolve the host-side id for a local mirrored object (-1 if unbound). */
+  static hostIdFor(obj: ModuleObject): number {
+    return this.hostIds.get(obj) ?? -1;
   }
 
   /** Message switchboard for host->client world replication. */
@@ -192,12 +205,50 @@ export class CoopClientMirror {
         break;
       }
       case IPCMessageTypeObject.State: {
-        const obj = this.objects.get(msg.objectIdAt(0)) as ModuleDoor;
+        const obj: any = this.objects.get(msg.objectIdAt(0));
         if(!obj){ break; }
         const field = msg.intAt(1);
         const value = msg.intAt(2);
-        if(field == 0 && typeof obj.setOpenState === 'function' && obj.openState != value){
+        if(field == CoopObjectStateField.DoorOpenState && typeof obj.setOpenState === 'function' && obj.openState != value){
           obj.setOpenState(value);
+        }else if(field == CoopObjectStateField.CombatState && obj.combatData){
+          obj.combatData.combatState = !!value;
+          if(typeof obj.weaponPowered === 'function'){
+            obj.weaponPowered(!!value);
+          }
+        }
+        break;
+      }
+      case IPCMessageTypeObject.HP: {
+        const obj = this.objects.get(msg.objectIdAt(0));
+        if(!obj){ break; }
+        obj.currentHP = msg.intAt(1);
+        break;
+      }
+      case IPCMessageTypeObject.CombatEvent: {
+        const attacker = this.objects.get(msg.objectIdAt(0)) as ModuleCreature;
+        const target = this.objects.get(msg.objectIdAt(1));
+        if(!attacker || !target){ break; }
+        const result = msg.intAt(2);
+        const damage = msg.intAt(3);
+        const weaponSlot = msg.intAt(4);
+        if(
+          result == AttackResult.HIT_SUCCESSFUL ||
+          result == AttackResult.CRITICAL_HIT ||
+          result == AttackResult.AUTOMATIC_HIT
+        ){
+          TextSprite3D.CreateOnObject(target, damage.toString(), TextSprite3DType.HOSTILE, 1500);
+        }else if(result == AttackResult.MISS){
+          TextSprite3D.CreateOnObject(target, 'miss', TextSprite3DType.NEUTRAL, 1500);
+        }
+        //Blaster bolts/muzzle flash/shot SFX (no-op for melee weapons)
+        const weapon = weaponSlot == 2 ? attacker.equipment?.LEFTHAND : attacker.equipment?.RIGHTHAND;
+        if(weapon){
+          try{
+            WeaponProjectile.fireFromWeapon(weapon, attacker, target);
+          }catch(e){
+            console.warn('CoopClientMirror: bolt VFX failed', e);
+          }
         }
         break;
       }
@@ -237,6 +288,7 @@ export class CoopClientMirror {
 
     if(obj){
       this.objects.set(hostId, obj);
+      this.hostIds.set(obj, hostId);
     }else{
       console.warn(`CoopClientMirror: could not bind host object ${hostId} (tag '${tag}', slot ${partySlot})`);
     }

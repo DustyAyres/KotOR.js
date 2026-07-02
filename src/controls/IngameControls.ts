@@ -330,15 +330,20 @@ export class IngameControls {
           if(GameState.Mode == EngineMode.INGAME && GameState.MenuManager.GetCurrentMenu() == GameState.MenuManager.InGameOverlay){
             const moduleObject = GameState.CursorManager.onMouseHitInteractive();
             if(BitWise.InstanceOf(moduleObject?.objectType, ModuleObjectType.ModuleObject)){
-              if(moduleObject.isUseable() && moduleObject != GameState.getCurrentPlayer()){
+              const actor = GameState.getLocalControlledCreature();
+              if(moduleObject.isUseable() && moduleObject != actor){
 
                 selectedObject = true;
 
-                const distance = GameState.getCurrentPlayer().position.distanceTo(moduleObject.position);
+                const distance = actor.position.distanceTo(moduleObject.position);
                 const distanceThreshold = 20;
 
                 if(GameState.CursorManager.selectedObject == moduleObject && distance <= distanceThreshold){
-                  if(typeof moduleObject.onClick === 'function'){
+                  if(GameState.netMode == NetMode.CLIENT){
+                    //Co-op client: interactions are Commands for the claimed
+                    //member; the host validates and simulates.
+                    GameState.NetworkManager.clientInteract(moduleObject);
+                  }else if(typeof moduleObject.onClick === 'function'){
                     GameState.getCurrentPlayer().clearAllActions();
                     moduleObject.onClick(GameState.getCurrentPlayer());
                   }else{

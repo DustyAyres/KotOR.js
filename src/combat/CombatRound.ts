@@ -22,6 +22,8 @@ import { WeaponProjectile } from "@/combat/WeaponProjectile";
 import type { CombatRoundAction } from "@/combat/CombatRoundAction";
 import type { TalentFeat } from "@/talents";
 import { GameState } from "@/GameState";
+import { NetMode } from "@/enums/engine/NetMode";
+import { CoopHostReplicator } from "@/network/CoopHostReplicator";
 import { FeedbackMessageEntry } from "@/engine/FeedbackMessageEntry";
 import { FeebackMessageColor } from "@/enums/engine/FeedbackMessageColor";
 
@@ -503,6 +505,18 @@ export class CombatRound {
           TextSprite3D.CreateOnObject(this.action.target, attack.getTotalDamage().toString(), TextSprite3DType.HOSTILE, 1500);
         }else if(attack.attackResult == AttackResult.MISS){
           TextSprite3D.CreateOnObject(this.action.target, 'miss', TextSprite3DType.NEUTRAL, 1500);
+        }
+
+        //Co-op: replicate the resolved attack so clients can reproduce the
+        //cosmetics not derivable from HP/anim state (floaty text, bolts).
+        if(GameState.netMode == NetMode.HOST){
+          CoopHostReplicator.onCombatAttack(
+            creature,
+            this.action.target,
+            attack.attackResult,
+            attack.getTotalDamage(),
+            attack.attackWeapon == creature.equipment.LEFTHAND ? 2 : 1
+          );
         }
       }
     }

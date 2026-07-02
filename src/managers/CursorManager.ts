@@ -246,7 +246,7 @@ export class CursorManager {
 	 * @param object The module object to mark as selected
 	 */
 	public static setReticleSelectedObject( object: ModuleObject ){
-		GameState.getCurrentPlayer().lookAt(object);
+		GameState.getLocalControlledCreature().lookAt(object);
 		if(object){
 			CursorManager.selected = object.getReticleNode();
 			if(CursorManager.selected){
@@ -262,13 +262,13 @@ export class CursorManager {
 				}		
 				CursorManager.setReticle2('reticleF2');
 			}else if(BitWise.InstanceOf(object?.objectType, ModuleObjectType.ModuleCreature)){
-				if(object.isHostile(GameState.getCurrentPlayer())){
+				if(object.isHostile(GameState.getLocalControlledCreature())){
 					CursorManager.setReticle2('reticleH2');
 				}else{
 					CursorManager.setReticle2('reticleF2');
 				}
 			}else if(BitWise.InstanceOf(object?.objectType, ModuleObjectType.ModuleTrigger)){
-				if(object.isHostile(GameState.getCurrentPlayer())){
+				if(object.isHostile(GameState.getLocalControlledCreature())){
 					CursorManager.setReticle2('reticleF2');
 				}else{
 					CursorManager.setReticle2('reticleF2');
@@ -325,7 +325,7 @@ export class CursorManager {
 			CursorManager.setReticle('reticleF');
 		}else if(BitWise.InstanceOf(object?.objectType, ModuleObjectType.ModuleCreature)){
 
-			if(object.isHostile(GameState.getCurrentPlayer())){
+			if(object.isHostile(GameState.getLocalControlledCreature())){
 				if(!object.isDead()){
 					if(canChangeCursor)
 						CursorManager.setCursor('attack');
@@ -407,7 +407,7 @@ export class CursorManager {
 
 		CursorManager.arrow.visible = false;
 		if(CursorManager.selectedObject){
-			if(CursorManager.selectedObject.position.distanceToSquared(GameState.getCurrentPlayer().position) > maxSelectableDistanceSquared){
+			if(CursorManager.selectedObject.position.distanceToSquared(GameState.getLocalControlledCreature().position) > maxSelectableDistanceSquared){
 				CursorManager.selectedObject = undefined;
 				CursorManager.selected = undefined;
 			}
@@ -419,7 +419,7 @@ export class CursorManager {
 		}
 
 		if(CursorManager.hoveredObject){
-			if(CursorManager.hoveredObject.position.distanceToSquared(GameState.getCurrentPlayer().position) > maxSelectableDistanceSquared){
+			if(CursorManager.hoveredObject.position.distanceToSquared(GameState.getLocalControlledCreature().position) > maxSelectableDistanceSquared){
 				CursorManager.hoveredObject = undefined;
 				CursorManager.hovered = undefined;
 			}
@@ -471,7 +471,7 @@ export class CursorManager {
 				}		
 				CursorManager.setReticle2('reticleF2');
 			}else if(BitWise.InstanceOfObject(CursorManager.selectedObject, ModuleObjectType.ModuleCreature)){
-				if(CursorManager.selectedObject.isHostile(GameState.getCurrentPlayer())){
+				if(CursorManager.selectedObject.isHostile(GameState.getLocalControlledCreature())){
 					CursorManager.setReticle2('reticleH2');
 				}else{
 					CursorManager.setReticle2('reticleF2');

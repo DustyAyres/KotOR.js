@@ -1326,8 +1326,13 @@ export class GameState implements EngineContext {
     //Handle Module Tick
     if(GameState.netMode == NetMode.CLIENT){
       //Co-op thin client: render/anim-only tick — never simulates. The host's
-      //authoritative state (incl. pause) arrives via replication.
-      GameState.module.tickClient(delta);
+      //authoritative state (incl. pause) arrives via replication; when the
+      //shared session is paused, render like single-player pause (anims freeze).
+      if(GameState.State == EngineState.PAUSED){
+        GameState.module.tickPaused(delta);
+      }else{
+        GameState.module.tickClient(delta);
+      }
     }else if(
       GameState.State == EngineState.PAUSED || GameState.MenuManager.activeModals.length
     ){
