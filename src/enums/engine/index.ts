@@ -9,6 +9,7 @@ export * from "@/enums/engine/LightPriority";
 export * from "@/enums/engine/MapMode";
 export * from "@/enums/engine/MapNorthAxis";
 export * from "@/enums/engine/MiniGameType";
+export * from "@/enums/engine/NetMode";
 export * from "@/enums/engine/PerceptionMask";
 export * from "@/enums/engine/PerceptionType";
 export * from "@/enums/engine/ReputationConstant";

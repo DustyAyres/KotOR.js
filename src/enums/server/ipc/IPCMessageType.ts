@@ -5,6 +5,13 @@ export enum IPCMessageType {
   Area = 0x02,
   Object = 0x03,
   Script = 0x04,
+  /**
+   * Co-op categories (type = category, subType = IPCMessageTypeSession/Command).
+   * Values chosen clear of the legacy debugger ids below (0x01-0x0B), which use
+   * `type` directly as a message id on the BroadcastChannel transport.
+   */
+  Session = 0x10,
+  Command = 0x11,
   Debug = 0x0FF,
 
 

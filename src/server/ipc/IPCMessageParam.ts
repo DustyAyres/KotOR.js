@@ -1,4 +1,3 @@
-import { BinaryReader } from "@/utility/binary/BinaryReader";
 import { IPCDataType } from "@/enums/server/ipc/IPCDataType";
 
 /**
@@ -31,20 +30,21 @@ export class IPCMessageParam {
       this.value = new Uint8Array(value);
     }else if(type == IPCDataType.STRING){
       this.value = new TextEncoder().encode(value ? value : '');
-    }else if(typeof value == 'number' && type == IPCDataType.INTEGER){
+    }else if(typeof value == 'number' && (type == IPCDataType.INTEGER || type == IPCDataType.OBJECT_ID)){
       this.value = new Uint8Array(4);
-      const view = new DataView(this.value.buffer); 
+      const view = new DataView(this.value.buffer);
       view.setInt32(0, value, true);
     }else if(typeof value == 'number' && type == IPCDataType.FLOAT){
       this.value = new Uint8Array(4);
-      const view = new DataView(this.value.buffer); 
+      const view = new DataView(this.value.buffer);
       view.setFloat32(0, value, true);
     }else{
+      this.value = new Uint8Array(0);
       return;
     }
     this.size = IPCMessageParam.HeaderSize + this.value.length;
   }
-  
+
   /**
    * Returns the value as a string.
    * @returns The decoded string.
@@ -58,8 +58,16 @@ export class IPCMessageParam {
    * @returns The decoded integer.
    */
   getInt32(): number {
-    const view = new DataView(this.value.buffer);
+    const view = new DataView(this.value.buffer, this.value.byteOffset, this.value.byteLength);
     return view.getInt32(0, true);
+  }
+
+  /**
+   * Returns the value as a game object id (dword stored as i32).
+   * @returns The decoded object id.
+   */
+  getObjectId(): number {
+    return this.getInt32();
   }
 
   /**
@@ -67,7 +75,7 @@ export class IPCMessageParam {
    * @returns The decoded float.
    */
   getFloat(): number {
-    const view = new DataView(this.value.buffer);
+    const view = new DataView(this.value.buffer, this.value.byteOffset, this.value.byteLength);
     return view.getFloat32(0, true);
   }
 
@@ -98,7 +106,7 @@ export class IPCMessageParam {
    * @returns The restored IPCMessageParam.
    */
   static fromBuffer(buffer: Uint8Array): IPCMessageParam {
-    const view = new DataView(buffer.buffer);
+    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     const type = view.getUint32(0, true);
     const size = view.getUint32(4, true);
     const value = buffer.slice(IPCMessageParam.HeaderSize, IPCMessageParam.HeaderSize + size);

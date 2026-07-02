@@ -1,3 +1,4 @@
+import { IPCDataType } from "@/enums/server/ipc/IPCDataType";
 import { IPCMessageType } from "@/enums/server/ipc/IPCMessageType";
 import { IPCMessageParam } from "@/server/ipc/IPCMessageParam";
 
@@ -54,6 +55,38 @@ export class IPCMessage {
     return this.#params[index];
   }
 
+  /** Fluent builders — append a typed parameter and return this. */
+  addInt(value: number): this {
+    this.addParam(new IPCMessageParam(IPCDataType.INTEGER, value | 0));
+    return this;
+  }
+
+  addFloat(value: number): this {
+    this.addParam(new IPCMessageParam(IPCDataType.FLOAT, value));
+    return this;
+  }
+
+  addString(value: string): this {
+    this.addParam(new IPCMessageParam(IPCDataType.STRING, value));
+    return this;
+  }
+
+  addObjectId(value: number): this {
+    this.addParam(new IPCMessageParam(IPCDataType.OBJECT_ID, value | 0));
+    return this;
+  }
+
+  addVoidBytes(value: Uint8Array): this {
+    this.addParam(new IPCMessageParam(IPCDataType.VOID, value));
+    return this;
+  }
+
+  /** Typed readers by parameter index. */
+  intAt(index: number): number { return this.#params[index]?.getInt32() ?? 0; }
+  floatAt(index: number): number { return this.#params[index]?.getFloat() ?? 0; }
+  stringAt(index: number): string { return this.#params[index]?.getString() ?? ''; }
+  objectIdAt(index: number): number { return this.#params[index]?.getObjectId() ?? 0; }
+
   /**
    * Converts the IPCMessage to an output buffer.
    * @returns The buffer.
@@ -79,7 +112,7 @@ export class IPCMessage {
    * @returns The restored IPCMessage.
    */
   static fromBuffer(buffer: Uint8Array): IPCMessage {
-    const view = new DataView(buffer.buffer);
+    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     const message = new IPCMessage(view.getUint16(0, true) as IPCMessageType, view.getUint16(2, true));
     const paramCount = view.getUint16(4, true);
     let offset = IPCMessage.HeaderSize;

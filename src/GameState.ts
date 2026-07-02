@@ -3,7 +3,7 @@ import {
   AppearanceManager, AutoPauseManager, TLKManager, CharGenManager, CheatConsoleManager, CameraShakeManager, ConfigManager, CursorManager, DialogMessageManager,
   FadeOverlayManager, FeedbackMessageManager, GlobalVariableManager, InventoryManager, JournalManager, LightManager, MenuManager, ModuleObjectManager, PartyManager,
   ResolutionManager, ShaderManager, TwoDAManager, FactionManager,
-  VideoEffectManager, VideoManager, PazaakManager, UINotificationManager, CutsceneManager, LegalScreenManager
+  VideoEffectManager, VideoManager, PazaakManager, UINotificationManager, CutsceneManager, LegalScreenManager, NetworkManager
 } from "@/managers";
 
 import type { SWRuleSet } from "@/engine/rules/SWRuleSet";
@@ -33,7 +33,7 @@ import { ITextureLoaderQueuedRef } from "@/interface/loaders/ITextureLoaderQueue
 
 import { AudioEngineChannel } from "@/enums/audio/AudioEngineChannel";
 import { AudioPriorityGroup } from "@/enums/audio/AudioPriorityGroup";
-import { EngineState, EngineMode, GameEngineType, GameEngineEnv, EngineDebugType } from "@/enums/engine";
+import { EngineState, EngineMode, GameEngineType, GameEngineEnv, EngineDebugType, NetMode } from "@/enums/engine";
 import { TextureType } from "@/enums/loaders/TextureType";
 
 import { EngineContext } from "@/engine/EngineContext";
@@ -118,6 +118,7 @@ export class GameState implements EngineContext {
   static UINotificationManager: typeof UINotificationManager;
   static CutsceneManager: typeof CutsceneManager;
   static LegalScreenManager: typeof LegalScreenManager;
+  static NetworkManager: typeof NetworkManager;
   static lastGameplayThumb?: OffscreenCanvas;
   static lastGameplayThumbCtx?: OffscreenCanvasRenderingContext2D;
   static lastGameplayThumbRT?: THREE.WebGLRenderTarget;
@@ -185,8 +186,13 @@ export class GameState implements EngineContext {
   };
   
   static IsPaused = false;
-  
+
   static Mode: EngineMode = EngineMode.GUI;
+  /**
+   * Co-op/netplay role of this process (NONE = single-player). HOST runs the
+   * authoritative sim; CLIENT mirrors it and must not run AI/scripts/combat.
+   */
+  static netMode: NetMode = NetMode.NONE;
   static holdWorldFadeInForDialog = false;
   static autoRun = false;
   static AlphaTest = 0.5;
@@ -1191,6 +1197,10 @@ export class GameState implements EngineContext {
     }
 
     GameState.controls.Update(delta);
+    //Co-op network pump (keepalive + replication flush when connected)
+    if(GameState.NetworkManager && GameState.netMode != NetMode.NONE){
+      GameState.NetworkManager.update(delta);
+    }
     GameState.scene_cursor_holder.visible = GameState.Mode != EngineMode.MOVIE && GameState.Mode != EngineMode.LEGAL;
     if(GameState.Mode == EngineMode.MOVIE || GameState.VideoManager.isMoviePlaying()){
       GameState.Mode = EngineMode.MOVIE;

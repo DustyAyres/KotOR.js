@@ -4,4 +4,6 @@ export * from "@/enums/server/ipc/IPCMessageTypeModule";
 export * from "@/enums/server/ipc/IPCMessageTypeArea";
 export * from "@/enums/server/ipc/IPCMessageTypeObject";
 export * from "@/enums/server/ipc/IPCMessageTypeScript";
+export * from "@/enums/server/ipc/IPCMessageTypeSession";
+export * from "@/enums/server/ipc/IPCMessageTypeCommand";
 export * from "@/enums/server/ipc/IPCDataType";

@@ -17,6 +17,9 @@ export * from "@/controls";
 
 export * from "@/enums";
 
+export * from "@/server/ipc";
+export * from "@/network";
+
 export * from "@/interface";
 
 export * from "@/LoadingScreen";

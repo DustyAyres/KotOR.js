@@ -129,6 +129,7 @@ export class GameInitializer {
     KotOR.GameState.CutsceneManager = KotOR.CutsceneManager;
     KotOR.GameState.VideoManager = KotOR.VideoManager;
     KotOR.GameState.LegalScreenManager = KotOR.LegalScreenManager;
+    KotOR.GameState.NetworkManager = KotOR.NetworkManager;
 
     KotOR.GameState.SWRuleSet = KotOR.SWRuleSet;
 

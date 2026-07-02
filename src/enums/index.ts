@@ -17,3 +17,4 @@ export * from "@/enums/module";
 export * from "@/enums/nwscript";
 export * from "@/enums/odyssey";
 export * from "@/enums/resource";
+export * from "@/enums/server";

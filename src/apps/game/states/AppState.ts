@@ -266,12 +266,34 @@ export class AppState {
 
     // WEB_TEST quick-start: ?module=<resref> jumps straight into a level with a
     // provisioned default PC, skipping chargen and the prologue entirely.
+    // Co-op: ?coop=host hosts the session after quick-starting; ?coop=join
+    // connects as a thin client (no local quickStart — the client mirrors the
+    // host's module). Optional: &coopAddr=ws://host:8090 &coopSession=CODE.
     if(AppState.env == ApplicationEnvironment.WEB_TEST){
       (window as any).AppState = AppState; // expose for programmatic harness driving
       const q = new URLSearchParams(window.location.search);
       const quickModule = q.get('module');
+      const coop = q.get('coop');
+      const coopAddr = q.get('coopAddr') || undefined;
+      const coopSession = q.get('coopSession') || undefined;
+      if(coop === 'join'){
+        try{
+          await KotOR.NetworkManager.join(coopAddr, coopSession, q.get('name') || 'player');
+        }catch(e){
+          console.error('coop: join failed', e);
+        }
+        AppState.loaderHide();
+        return;
+      }
       if(quickModule){
         await AppState.quickStart(quickModule, q.get('waypoint') || '');
+        if(coop === 'host'){
+          try{
+            await KotOR.NetworkManager.host(coopAddr, coopSession);
+          }catch(e){
+            console.error('coop: host failed', e);
+          }
+        }
         AppState.loaderHide();
         return;
       }
