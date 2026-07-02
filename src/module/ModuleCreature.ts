@@ -4705,7 +4705,8 @@ export class ModuleCreature extends ModuleObject {
 
     gff.RootNode.addField( new GFFField(GFFDataType.SHORT, 'fortbonus') ).setValue(this.fortbonus);
     gff.RootNode.addField( new GFFField(GFFDataType.SHORT, 'refbonus') ).setValue(this.refbonus);
-    gff.RootNode.addField( new GFFField(GFFDataType.SHORT, 'refbonus') ).setValue(this.refbonus);
+    // was a copy-pasted second 'refbonus' write — willbonus never survived a save/load
+    gff.RootNode.addField( new GFFField(GFFDataType.SHORT, 'willbonus') ).setValue(this.willbonus);
 
     this.template = gff;
 

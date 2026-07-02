@@ -236,7 +236,19 @@ export class CombatAttackData {
       if(isOffHand && strMod > 0){
         strMod = Math.floor(strMod / 2);
       }
-      this.damageList[DamageType.PHYSICAL].addDamage(strMod * damageMultiplier);
+      const strDamage = strMod * damageMultiplier;
+      if(strDamage > 0){
+        this.damageList[DamageType.PHYSICAL].addDamage(strDamage);
+      }else if(strDamage < 0){
+        //A NEGATIVE STR mod must reduce the hit, but addDamage() rejects non-positive
+        //amounts and getTotalDamage() ignores negative slots — so subtract from the
+        //weapon's own damage slot, clamped at 0. The ≥1 floor below then restores the
+        //engine's pre-mitigation minimum for a landed attack.
+        const slot = this.damageList[this.attackWeapon.getBaseDamageType()];
+        if(slot.damageValue > 0){
+          slot.damageValue = Math.max(slot.damageValue + strDamage, 0);
+        }
+      }
     }
 
     //The engine floors a landed attack's damage at 1 BEFORE mitigation (FUN_006adec0);
