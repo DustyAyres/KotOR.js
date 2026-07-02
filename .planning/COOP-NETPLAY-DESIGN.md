@@ -1,6 +1,8 @@
 # KotOR.js Co-op / Net Play — Design & Architecture
 
-Status: **IN PROGRESS** (v1 implementation started 2026-07-01). Target baseline: **KotOR 2 / TSL** first (netcode lives in shared `src/`, not `src/game/{kotor,tsl}`, so K1 follows for free; only menus/test-scenario are game-specific).
+Status: **V1 LANDED on master 2026-07-02** (phases 1–5: relay transport, world mirror, claim+owned movement, shared combat+sync pause, UI). Target baseline: **KotOR 2 / TSL** first (netcode lives in shared `src/`, not `src/game/{kotor,tsl}`, so K1 follows for free; only menus/test-scenario are game-specific).
+
+**Deferred beyond v1** (see git log `feat(coop)` for what landed): conversation replication/spectating (clicks are blocked with a popup), module-transition drag-along, dynamic party-membership replication (party changes after a client synced don't stream — client must rejoin), client equipment/level-up mutation (screens are view-only for clients; host-side state is authoritative), effect/VFX replication, faction/reputation change replication, GFF late-join snapshot (late joiners get the Create burst only), K1 menu wiring, client-side movement prediction.
 
 ## 0. Decisions locked (2026-07-01, with the user)
 

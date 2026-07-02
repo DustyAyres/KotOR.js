@@ -577,6 +577,10 @@ export class NetworkManager {
       }
       //Friendly creature: conversations are host-only (design §7).
       this.processEventListener('dialog-blocked', [obj]);
+      const confirm: any = GameState.MenuManager?.InGameConfirm;
+      if(confirm && typeof confirm.fromString === 'function'){
+        confirm.fromString('Only the party leader can speak to them.');
+      }
       console.log('NetworkManager: conversations are host-only — blocked');
       return;
     }

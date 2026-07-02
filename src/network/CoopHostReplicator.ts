@@ -46,10 +46,13 @@ export class CoopHostReplicator {
   /** Number of peers currently mirroring (replication only runs when > 0). */
   static #replicatingPeers: Set<number> = new Set();
   static #lastPaused: boolean = false;
+  /** Peers that completed the handshake before the host had a module loaded. */
+  static #peersAwaitingWorld: Set<number> = new Set();
 
   static reset(){
     this.lastSent.clear();
     this.#replicatingPeers.clear();
+    this.#peersAwaitingWorld.clear();
     this.#tickTimer = 0;
     this.#lastPaused = false;
   }
@@ -65,7 +68,14 @@ export class CoopHostReplicator {
   static onPeerReady(peerId: number){
     const nm = GameState.NetworkManager;
     const pm = GameState.PartyManager;
-    if(!nm?.session || !GameState.module){ return; }
+    if(!nm?.session){ return; }
+    if(!GameState.module?.readyToProcessEvents){
+      //Host hasn't loaded a world yet (hosting armed from the main menu):
+      //defer the party/module sync until the module is ready.
+      this.#peersAwaitingWorld.add(peerId);
+      console.log(`CoopHostReplicator: peer ${peerId} waiting for the host to load a module`);
+      return;
+    }
 
     const party = pm.party;
     for(let i = 0; i < party.length; i++){
@@ -146,6 +156,18 @@ export class CoopHostReplicator {
 
   static onPeerLeft(peerId: number){
     this.#replicatingPeers.delete(peerId);
+    this.#peersAwaitingWorld.delete(peerId);
+  }
+
+  /** Send the world to peers that joined before the host loaded a module. */
+  static flushPeersAwaitingWorld(){
+    if(!this.#peersAwaitingWorld.size){ return; }
+    if(!GameState.module?.readyToProcessEvents){ return; }
+    const waiting = [...this.#peersAwaitingWorld];
+    this.#peersAwaitingWorld.clear();
+    for(const peerId of waiting){
+      this.onPeerReady(peerId);
+    }
   }
 
   /** 1 = creature, 2 = door, 3 = placeable */
@@ -166,6 +188,7 @@ export class CoopHostReplicator {
 
   /** Per-frame pump (called from NetworkManager.update on the host). */
   static update(delta: number){
+    this.flushPeersAwaitingWorld();
     if(!this.active){ return; }
     this.#tickTimer += delta * 1000;
     if(this.#tickTimer < TICK_INTERVAL_MS){ return; }

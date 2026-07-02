@@ -1,4 +1,5 @@
 import { GameState } from "@/GameState";
+import { NetMode } from "@/enums/engine/NetMode";
 import { LBL_3DView } from "@/gui";
 import type { GUILabel, GUIButton, GUISlider } from "@/gui";
 import { MDLLoader, TextureLoader } from "@/loaders";
@@ -92,6 +93,11 @@ export class MenuCharacter extends K1_MenuCharacter {
 
       this.BTN_AUTO.addEventListener('click', (e) => {
         e.stopPropagation();
+        if(GameState.netMode == NetMode.CLIENT){
+          //Level-up state lives on the host; client-side leveling would desync.
+          (this.manager.InGameConfirm as any)?.fromString?.('Leveling up is not yet supported for co-op players.');
+          return;
+        }
         if(GameState.getCurrentPlayer().canLevelUp()){
           GameState.getCurrentPlayer().autoLevelUp();
           this.updateCharacterStats(GameState.getCurrentPlayer());
@@ -107,6 +113,10 @@ export class MenuCharacter extends K1_MenuCharacter {
       // opens on top; when it closes this screen re-shows and updateCharacterStats refreshes.
       this.BTN_LEVELUP?.addEventListener('click', (e) => {
         e.stopPropagation();
+        if(GameState.netMode == NetMode.CLIENT){
+          (this.manager.InGameConfirm as any)?.fromString?.('Leveling up is not yet supported for co-op players.');
+          return;
+        }
         const pc = GameState.getCurrentPlayer();
         if(pc.canLevelUp()){
           (GameState.MenuManager.MenuLevelUp as any).startLevelUp(pc);
@@ -116,6 +126,7 @@ export class MenuCharacter extends K1_MenuCharacter {
       this.BTN_CHANGE1?.addEventListener('click', (e) => {
         e.stopPropagation();
         if (GameState.PartyManager.party.length > 1) {
+          if(this.blockSwitchToClaimedMember(1)){ return; }
           GameState.PartyManager.SwitchLeaderAtIndex(1);
           this.updateCharacterPortrait(GameState.PartyManager.party[0]);
           this.updateCharacterStats(GameState.PartyManager.party[0]);
@@ -125,6 +136,7 @@ export class MenuCharacter extends K1_MenuCharacter {
       this.BTN_CHANGE2?.addEventListener('click', (e) => {
         e.stopPropagation();
         if (GameState.PartyManager.party.length > 2) {
+          if(this.blockSwitchToClaimedMember(2)){ return; }
           GameState.PartyManager.SwitchLeaderAtIndex(2);
           this.updateCharacterPortrait(GameState.PartyManager.party[0]);
           this.updateCharacterStats(GameState.PartyManager.party[0]);
@@ -195,6 +207,20 @@ export class MenuCharacter extends K1_MenuCharacter {
     } catch (e: any) { }
   }
 
+  /**
+   * Co-op ownership gate: the host cannot switch to / manage a member that a
+   * connected player controls (and clients cannot switch at all).
+   */
+  blockSwitchToClaimedMember(index: number): boolean {
+    if(GameState.netMode == NetMode.CLIENT){ return true; }
+    const member = GameState.PartyManager.party[index];
+    if(member && member.ownerPeerId >= 0){
+      (this.manager.InGameConfirm as any)?.fromString?.(`${member.getName?.() || member.tag} is controlled by another player.`);
+      return true;
+    }
+    return false;
+  }
+
   updateCharacterStats(character: any) {
     super.updateCharacterStats(character);
     // Show the manual "Level Up" button only when the character can actually level up
@@ -211,9 +237,16 @@ export class MenuCharacter extends K1_MenuCharacter {
     super.show();
     try {
       this.recalculatePosition();
-      this.updateCharacterPortrait(GameState.PartyManager.party[0]);
-      this.updateCharacterStats(GameState.PartyManager.party[0]);
+      //Co-op client: the sheet shows the claimed member, and character
+      //switching is disabled (ownership gating, design §3/§6).
+      const character = GameState.getLocalControlledCreature() ?? GameState.PartyManager.party[0];
+      this.updateCharacterPortrait(character);
+      this.updateCharacterStats(character);
       this.updatePartyMemberPortraitButtons();
+      if(GameState.netMode == NetMode.CLIENT){
+        this.BTN_CHANGE1?.hide();
+        this.BTN_CHANGE2?.hide();
+      }
     } catch (e) {
       console.error(e);
     }

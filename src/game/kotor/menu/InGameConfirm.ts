@@ -148,7 +148,16 @@ export class InGameConfirm extends GameMenu {
   fromStringRef(strRef: number){
     const tlkString = GameState.TLKManager.GetStringById(strRef);
     if(!tlkString){ return; }
-    this.LB_MESSAGE.setItem(tlkString.Value);
+    this.fromString(tlkString.Value);
+  }
+
+  /**
+   * Show an OK-only popup with a raw (non-TLK) string — e.g. co-op notices
+   * like "Only the party leader can speak to them."
+   */
+  fromString(text: string){
+    if(!text){ return; }
+    this.LB_MESSAGE.setItem(text);
     const node = this.LB_MESSAGE.children[0];
     this.messageBoxHeight = node.textSize.y;
     this.LB_MESSAGE.extent.height = this.LB_MESSAGE.height = this.messageBoxHeight;
@@ -159,7 +168,7 @@ export class InGameConfirm extends GameMenu {
 
     this.onOk = () => {};
     this.onCancel = () => {};
-    
+
     this.open();
   }
 

@@ -5,6 +5,7 @@ import { MenuEquipment as K1_MenuEquipment } from "@/game/kotor/KOTOR";
 import { GUIItemEquipped } from "@/gui/protoitem/GUIItemEquipped";
 import { GUIItemNone } from "@/gui/protoitem/GUIItemNone";
 import { GameState } from "@/GameState";
+import { NetMode } from "@/enums/engine/NetMode";
 import { GUIInventoryItem } from "@/game/tsl/gui/GUIInventoryItem";
 
 const STR_SLOT_DISABLED = 125554; //You cannot equip or remove an item from this slot.
@@ -272,6 +273,11 @@ export class MenuEquipment extends K1_MenuEquipment {
 
       this.BTN_EQUIP.addEventListener('click', (e) => {
         e.stopPropagation();
+        if(GameState.netMode == NetMode.CLIENT){
+          //Inventory/equipment state lives on the host; local equips would desync.
+          (this.manager.InGameConfirm as any)?.fromString?.('Changing equipment is not yet supported for co-op players.');
+          return;
+        }
         if(this.selectedItem instanceof ModuleItem || this.selectedItem instanceof GUIItemNone){
           const currentPC = GameState.PartyManager.party[this.currentNPCIndex];
           if(this.selectedItem instanceof GUIItemNone){
@@ -298,6 +304,7 @@ export class MenuEquipment extends K1_MenuEquipment {
       this.BTN_PREVNPC.addEventListener('click', (e) => {
         e.stopPropagation();
         if(GameState.PartyManager.party.length > 1){
+          if(this.blockSwitchToClaimedMember(GameState.PartyManager.party.length - 1)){ return; }
           GameState.PartyManager.SwitchLeaderAtIndex(GameState.PartyManager.party.length - 1);
         }
       });
@@ -305,11 +312,16 @@ export class MenuEquipment extends K1_MenuEquipment {
       this.BTN_NEXTNPC.addEventListener('click', (e) => {
         e.stopPropagation();
         if(GameState.PartyManager.party.length > 1){
+          if(this.blockSwitchToClaimedMember(1)){ return; }
           GameState.PartyManager.SwitchLeaderAtIndex(1);
         }
       });
 
       this.BTN_SWAPWEAPONS.addEventListener('click', (e) => {
+        if(GameState.netMode == NetMode.CLIENT){
+          (this.manager.InGameConfirm as any)?.fromString?.('Changing equipment is not yet supported for co-op players.');
+          return;
+        }
         const currentPC = GameState.PartyManager.party[this.currentNPCIndex];
         if(currentPC){
           const right_1 = currentPC.equipment.RIGHTHAND;
@@ -579,9 +591,33 @@ export class MenuEquipment extends K1_MenuEquipment {
     }
   }
 
+  /**
+   * Co-op ownership gate: the host cannot switch to a member a connected
+   * player controls; clients cannot switch at all.
+   */
+  blockSwitchToClaimedMember(index: number): boolean {
+    if(GameState.netMode == NetMode.CLIENT){ return true; }
+    const member = GameState.PartyManager.party[index];
+    if(member && member.ownerPeerId >= 0){
+      (this.manager.InGameConfirm as any)?.fromString?.(`${member.getName?.() || member.tag} is controlled by another player.`);
+      return true;
+    }
+    return false;
+  }
+
   show() {
-    this.currentNPCIndex = 0;
+    //Co-op client: the equipment screen shows only the claimed member.
+    if(GameState.netMode == NetMode.CLIENT){
+      const slot = GameState.NetworkManager?.controlledSlot ?? -1;
+      this.currentNPCIndex = slot >= 0 ? slot : 0;
+    }else{
+      this.currentNPCIndex = 0;
+    }
     super.show();
+    if(GameState.netMode == NetMode.CLIENT){
+      this.BTN_PREVNPC?.hide();
+      this.BTN_NEXTNPC?.hide();
+    }
     this.LBL_BACK1.widget.position.z = 0;
   }
 

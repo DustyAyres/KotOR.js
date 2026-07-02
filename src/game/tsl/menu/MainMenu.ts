@@ -9,6 +9,7 @@ import { OdysseyModel3D } from "@/three/odyssey";
 import { ApplicationProfile } from "@/utility/ApplicationProfile";
 import { MainMenu as K1_MainMenu } from "@/game/kotor/KOTOR";
 import { CombatArena } from "@/game/tsl/CombatArena";
+import { CoopUI } from "@/network/CoopUI";
 
 /**
  * MainMenu class.
@@ -60,6 +61,9 @@ export class MainMenu extends K1_MainMenu {
         e.stopPropagation();
         CombatArena.Launch();
       });
+
+      // Co-op / net play entry (DOM overlay — the .gui defines no spare buttons)
+      CoopUI.attachMainMenu();
 
       this.BTN_NEWGAME.addEventListener('click', (e) => {
         e.stopPropagation();
