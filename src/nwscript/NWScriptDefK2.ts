@@ -5794,7 +5794,14 @@ NWScriptDefK2.Actions = {
     name: 'IsFormActive',
     type: NWScriptDataType.INTEGER,
     args: [ NWScriptDataType.OBJECT, NWScriptDataType.INTEGER ],
-    action: undefined
+    action: function(this: NWScriptInstance, args: [ModuleObject, number]){
+      // TSL Lightsaber/Consular Form stances aren't implemented as toggleable modes yet, so
+      // no creature is ever "in" a form. FALSE is the correct baseline — the K2 spell scripts
+      // (k_inc_force) then take their unmodified damage/DC/duration branches, matching a
+      // caster who never activated a form. Explicit so the VM stops warning about an
+      // unimplemented routine on every force-power impact.
+      return 0;
+    }
   },
   817: {
     comment: '817\nDJS-OEI 3/28/2004\nReturns the Form Mask of the requested spell. This is used\nto determine if a spell is affected by various Forms, usually\nConsular forms that modify duration/range.',
