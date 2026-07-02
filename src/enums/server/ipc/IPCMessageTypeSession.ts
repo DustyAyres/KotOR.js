@@ -20,4 +20,8 @@ export enum IPCMessageTypeSession {
   SetPause = 0x07,
   /** H→C broadcast: peerId:INTEGER — a claimed slot was released (disconnect/story removal) */
   SlotReleased = 0x08,
+  /** H→C: slot:INTEGER (party index), npcId:INTEGER (-1 = PC), isLeader:INTEGER, template:VOID (UTC GFF) */
+  PartyMember = 0x09,
+  /** C→H: (no params) — client finished loading the host module; start replication */
+  ClientReady = 0x0A,
 }

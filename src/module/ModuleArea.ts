@@ -569,9 +569,83 @@ export class ModuleArea extends ModuleObject {
   }
 
   /**
+   * Co-op thin-client per-frame update: puppets + render support only.
+   * Skips triggers, encounters, AOEs and spell instances (host-side sim);
+   * creatures/doors/placeables run their updateClient (anims, visibility),
+   * rooms/camera/weather/music run as normal so the world looks alive.
+   * @param delta
+   */
+  updateClient(delta: number = 0){
+    let roomCount = this.rooms.length;
+    let creatureCount = this.creatures.length;
+    let placeableCount = this.placeables.length;
+    let doorCount = this.doors.length;
+    let partyCount = GameState.PartyManager.party.length;
+
+    //update party
+    for(let i = 0; i < partyCount; i++){
+      GameState.PartyManager.party[i].updateClient(delta);
+    }
+
+    //update creatures
+    for(let i = 0; i < creatureCount; i++){
+      this.creatures[i].updateClient(delta);
+    }
+
+    //update placeables
+    for(let i = 0; i < placeableCount; i++){
+      this.placeables[i].updateClient(delta);
+    }
+
+    //update doors
+    for(let i = 0; i < doorCount; i++){
+      this.doors[i].updateClient(delta);
+    }
+
+    //update rooms
+    for(let i = 0; i < roomCount; i++){
+      this.rooms[i].update(delta);
+    }
+
+    //update text sprites (floaty combat text spawned from replicated events)
+    const textSpriteIndexer = new Map();
+    for(let i = 0, textSpriteCount = this.textSprites.length; i < textSpriteCount; i++){
+      const sprite = this.textSprites[i];
+      if(!sprite) continue;
+
+      if(!textSpriteIndexer.has(sprite.owner.id)){
+        textSpriteIndexer.set(sprite.owner.id, 0);
+      }
+      const index = textSpriteIndexer.get(sprite.owner.id);
+
+      sprite.container.position.copy(sprite.position);
+      sprite.container.position.z = sprite.position.z + (0.1 * index);
+
+      sprite.update(delta);
+      textSpriteIndexer.set(sprite.owner.id, index + 1);
+    }
+
+    let textSpriteIndex = this.textSprites.length;
+    while(textSpriteIndex--){
+      const textSprite = this.textSprites[textSpriteIndex];
+      if(textSprite && textSprite.expired){
+        textSprite.dispose();
+        this.textSprites.splice(textSpriteIndex, 1);
+      }
+    }
+
+    this.updateRoomVisibility(delta);
+    FollowerCamera.update(delta, this);
+
+    this.weather.update(delta);
+
+    this.updateMusic(delta);
+  }
+
+  /**
    * Update room models width lightmaps to use animated lights
    * Animated lights are the only lights that can influence lightmapped surfaces
-   * @param delta 
+   * @param delta
    */
   updateRoomAnimatedLights(delta: number = 0){
 

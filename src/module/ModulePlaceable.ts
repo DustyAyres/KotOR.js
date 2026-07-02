@@ -181,8 +181,30 @@ export class ModulePlaceable extends ModuleObject {
     }
   }
 
+  /**
+   * Co-op thin-client update: model animation + visibility only. Animation
+   * state changes (open/close) arrive via replication; no action queue.
+   */
+  updateClient(delta = 0){
+    super.updateClient(delta);
+
+    if(this.collisionManager.walkmesh && this.model){
+      this.collisionManager.walkmesh.matrixWorld.copy(this.model.matrix);
+    }
+
+    if(this.model instanceof OdysseyModel3D){
+      if(this.room?.model instanceof OdysseyModel3D){
+        this.model.visible = this.room.model.visible;
+      }
+      if(this.model.visible && !this.static){
+        this.model.update(delta);
+      }
+      this.audioEmitter.setPosition(this.position.x, this.position.y, this.position.z);
+    }
+  }
+
   update(delta = 0){
-    
+
     super.update(delta);
 
     if(this.collisionManager.walkmesh && this.model){

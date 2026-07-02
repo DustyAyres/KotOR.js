@@ -531,7 +531,7 @@ export class ModuleObject {
 
   /**
    * Update the paused state
-   * @param delta 
+   * @param delta
    */
   updatePaused(delta: number = 0){
     // this.force = 0;
@@ -539,6 +539,23 @@ export class ModuleObject {
     if(this.spawned){
       this.updateModelVisibility();
     }
+  }
+
+  /**
+   * Co-op thin-client per-frame update: render support only (visibility,
+   * camera distance, bounds). No heartbeat, no effects, no scripts, no
+   * collision — the host simulates; state arrives via replication.
+   * @param delta
+   */
+  updateClient(delta: number = 0){
+    if(GameState.currentCamera){
+      this.distanceToCamera = this.position.distanceTo(GameState.currentCameraPosition);
+    }
+    if(this.spawned){
+      this.updateModelVisibility();
+    }
+    this.sphere.center.copy(this.position);
+    this.sphere.radius = this.getHitDistance() * 2;
   }
 
   /**

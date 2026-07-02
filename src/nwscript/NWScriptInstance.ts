@@ -2,6 +2,7 @@ import type EngineLocation from "@/engine/EngineLocation";
 import { NWScriptDataType } from "@/enums/nwscript/NWScriptDataType";
 import { GFFDataType } from "@/enums/resource/GFFDataType";
 import { DebuggerState } from "@/enums/server/DebuggerState";
+import { NetMode } from "@/enums/engine/NetMode";
 import { IPCDataType } from "@/enums/server/ipc/IPCDataType";
 import { IPCMessageType } from "@/enums/server/ipc/IPCMessageType";
 import type { EventTimedEvent } from "@/events";
@@ -267,6 +268,12 @@ export class NWScriptInstance {
   }
 
   run(caller: any = null, scriptVar = 0){
+    /**
+     * Co-op thin client: scripts NEVER run client-side — the host is the only
+     * script authority; results arrive via state replication. This single gate
+     * kills every heartbeat/onEnter/onSpawn/AI/module script on clients.
+     */
+    if(GameState.netMode == NetMode.CLIENT){ return; }
     this.caller = caller;
     this.scriptVar = scriptVar;
 

@@ -630,8 +630,21 @@ export class ModuleDoor extends ModuleObject {
     return false;
   }
 
+  /**
+   * Co-op thin-client update: door model animation + open/close state machine
+   * only. Open state changes arrive via replication (Object.State); no action
+   * queue, no transition checks (module transitions are host-directed).
+   */
+  updateClient(delta = 0){
+    super.updateClient(delta);
+    if(this.model instanceof OdysseyModel3D){
+      this.model.update(delta);
+    }
+    this.updateAnimationState(delta);
+  }
+
   update(delta = 0){
-    
+
     super.update(delta);
     if(this.model instanceof OdysseyModel3D){
       this.model.update(delta);

@@ -433,6 +433,21 @@ export class Module {
     }
   }
 
+  /**
+   * Co-op thin-client tick: render/animation only. No event queue (delayed
+   * scripts), no module effects, no game calendar — those are host-side; the
+   * client mirrors replicated state. Projectiles still advance because clients
+   * spawn them locally as cosmetics from replicated combat events.
+   */
+  tickClient(delta = 0){
+    if(this.readyToProcessEvents){
+      if(this.area){
+        this.area.updateClient(delta);
+      }
+      WeaponProjectile.updateAll(delta);
+    }
+  }
+
   setReturnStrRef(enabled = false, str1 = -1, str2 = -1){
     GameState.MenuManager.MenuMap.BTN_RETURN.setText(GameState.TLKManager.GetStringById(str1).Value);
   }

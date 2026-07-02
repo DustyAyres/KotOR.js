@@ -817,6 +817,100 @@ export class ModuleCreature extends ModuleObject {
     this.force = 0;
   }
 
+  /**
+   * Co-op thin-client per-frame update: render/animation puppet only.
+   * Position/facing/animation/death arrive via replication (CoopClientMirror);
+   * no AI, no action queue, no combat, no perception, no physics, no regen,
+   * no heartbeat runs client-side.
+   */
+  updateClient(delta = 0){
+    super.updateClient(delta);
+
+    if(this.willDestroy || this.destroyed){
+      return;
+    }
+
+    if(this.audioEmitter){
+      this.audioEmitter.setPosition(this.position.x, this.position.y, this.position.z + 1.0);
+      this.footstepEmitter.setPosition(this.position.x, this.position.y, this.position.z);
+    }
+
+    if(!this.isReady){
+      return;
+    }
+
+    this.area = GameState.module.area;
+
+    if(this.animationState.index == ModuleCreatureAnimState.IDLE){
+      this.footstepEmitter.isLooping = false;
+      this.footstepEmitter.stop();
+    }
+
+    this.updateAnimationState();
+    this.updateItems(delta);
+
+    if(this.model instanceof OdysseyModel3D && this.model.bonesInitialized){
+      this.model.animateFrame = true;
+      this.model.update(delta);
+      if(this.lipObject instanceof LIPObject){
+        this.lipObject.update(delta, this.model);
+      }
+      this.updateHeadTracking(delta);
+    }
+
+    //Facing interpolation toward the replicated facing target
+    this.turning = 0;
+    if(this.facingAnim){
+      const current = Utility.NormalizeRadian(this.rotation.z);
+      const target = this.facing;
+      const remaining = Utility.NormalizeRadian(target - current);
+      const step = this.facingSpeed * delta;
+      if(Math.abs(remaining) <= step){
+        this.rotation.z = target;
+        this.wasFacing = target;
+        this.facingAnim = false;
+      }else{
+        this.rotation.z = Utility.NormalizeRadian(current + Math.sign(remaining) * step);
+        this.turning = Math.sign(remaining);
+      }
+    }
+
+    //Update equipment item models (weapon anims, saber blades)
+    if(this.equipment.HEAD){
+      this.equipment.HEAD.update(delta);
+    }
+    if(this.equipment.ARMS){
+      this.equipment.ARMS.update(delta);
+    }
+    if(this.equipment.RIGHTARMBAND){
+      this.equipment.RIGHTARMBAND.update(delta);
+    }
+    if(this.equipment.LEFTARMBAND){
+      this.equipment.LEFTARMBAND.update(delta);
+    }
+    if(this.equipment.RIGHTHAND){
+      this.equipment.RIGHTHAND.update(delta);
+    }
+    if(this.equipment.LEFTHAND){
+      this.equipment.LEFTHAND.update(delta);
+    }
+    if(this.equipment.ARMOR){
+      this.equipment.ARMOR.update(delta);
+    }
+    if(this.equipment.BELT){
+      this.equipment.BELT.update(delta);
+    }
+    if(this.equipment.CLAW1){
+      this.equipment.CLAW1.update(delta);
+    }
+    if(this.equipment.CLAW2){
+      this.equipment.CLAW2.update(delta);
+    }
+    if(this.equipment.CLAW3){
+      this.equipment.CLAW3.update(delta);
+    }
+  }
+
   updateRegen(delta = 0){
     this.regenTimer -= delta;
     if(this.regenTimer <= 0){

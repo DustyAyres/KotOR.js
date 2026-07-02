@@ -1,5 +1,7 @@
 import { ActionStatus } from "@/enums/actions/ActionStatus";
 import { ActionType } from "@/enums/actions/ActionType";
+import { NetMode } from "@/enums/engine/NetMode";
+import { GameState } from "@/GameState";
 import type { ModuleObject } from "@/module";
 import type { Action } from "@/actions/Action";
 
@@ -144,6 +146,12 @@ export class ActionQueue extends Array {
    *
    */
   process( delta: number = 0 ){
+    /**
+     * Co-op thin client: actions never execute client-side (no movement, no
+     * ActionPhysicalAttacks -> no CombatRound, no dice). The host simulates;
+     * clients render replicated state.
+     */
+    if(GameState.netMode == NetMode.CLIENT){ return; }
     let action = this[0];
     if(!action){ return; }
     action.owner = this.owner;

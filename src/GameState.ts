@@ -1174,6 +1174,16 @@ export class GameState implements EngineContext {
   static Update(){
 
     requestAnimationFrame( GameState.Update );
+    GameState.UpdateTick();
+  }
+
+  /**
+   * One frame of the main loop. Normally driven by requestAnimationFrame via
+   * Update(); during co-op sessions a Web Worker ticker (NetworkManager) calls
+   * this directly while the tab is hidden, because rAF stops in background
+   * tabs and a hidden host would freeze the world for every connected player.
+   */
+  static UpdateTick(){
 
     // Test harness: freeze the sim (canvas keeps the last frame) when paused.
     if(TestHarness.paused) return;
@@ -1301,7 +1311,11 @@ export class GameState implements EngineContext {
     }
 
     //Handle Module Tick
-    if(
+    if(GameState.netMode == NetMode.CLIENT){
+      //Co-op thin client: render/anim-only tick — never simulates. The host's
+      //authoritative state (incl. pause) arrives via replication.
+      GameState.module.tickClient(delta);
+    }else if(
       GameState.State == EngineState.PAUSED || GameState.MenuManager.activeModals.length
     ){
       GameState.module.tickPaused(delta);
@@ -1349,7 +1363,11 @@ export class GameState implements EngineContext {
     if(isEntryMode){
       GameState.scene_cursor_holder.visible = false;
     }
-    GameState.module.tick(delta);
+    if(GameState.netMode == NetMode.CLIENT){
+      GameState.module.tickClient(delta);
+    }else{
+      GameState.module.tick(delta);
+    }
     GameState.CutsceneManager.update(delta);
     GameState.FadeOverlayManager.Update(delta);
     GameState.frustumMat4.multiplyMatrices( GameState.currentCamera.projectionMatrix, GameState.currentCamera.matrixWorldInverse )

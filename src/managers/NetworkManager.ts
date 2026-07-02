@@ -4,6 +4,8 @@ import { IPCMessageType } from "@/enums/server/ipc/IPCMessageType";
 import { IPCMessageTypeSession } from "@/enums/server/ipc/IPCMessageTypeSession";
 import { IPCMessage } from "@/server/ipc/IPCMessage";
 import { CoopSession } from "@/network/CoopSession";
+import { CoopHostReplicator } from "@/network/CoopHostReplicator";
+import { CoopClientMirror } from "@/network/CoopClientMirror";
 import {
   COOP_PROTOCOL_VERSION, COOP_DEFAULT_PORT, COOP_DEFAULT_SESSION,
   ICoopControlMessage
@@ -51,6 +53,38 @@ export class NetworkManager {
   static rtt: number = -1;
 
   static eventListeners: {[key: string]: Function[]} = {};
+
+  /**
+   * Background ticker: rAF stops in hidden tabs, which would freeze the
+   * host's sim (and a client's mirror) the moment the window loses
+   * visibility. Worker timers are not throttled, so while a net session is
+   * active a tiny worker pumps GameState.UpdateTick at ~20Hz whenever the
+   * document is hidden.
+   */
+  static #bgTicker: Worker | undefined;
+
+  static #startBackgroundTicker(){
+    if(this.#bgTicker){ return; }
+    try{
+      const src = `setInterval(function(){ postMessage(0); }, 50);`;
+      const worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+      worker.onmessage = () => {
+        if(document.hidden && GameState.netMode != NetMode.NONE){
+          GameState.UpdateTick();
+        }
+      };
+      this.#bgTicker = worker;
+    }catch(e){
+      console.warn('NetworkManager: background ticker unavailable', e);
+    }
+  }
+
+  static #stopBackgroundTicker(){
+    if(this.#bgTicker){
+      this.#bgTicker.terminate();
+      this.#bgTicker = undefined;
+    }
+  }
 
   static addEventListener(event: string, cb: Function){
     (this.eventListeners[event] = this.eventListeners[event] || []).push(cb);
@@ -104,6 +138,7 @@ export class NetworkManager {
     this.peerId = session.peerId;
     this.peers.clear();
     GameState.netMode = NetMode.HOST;
+    this.#startBackgroundTicker();
     console.log(`NetworkManager: hosting co-op session '${sessionCode}' via ${address}`);
     this.processEventListener('connected', [this.peerId]);
   }
@@ -123,6 +158,7 @@ export class NetworkManager {
     this.session = session;
     this.peerId = session.peerId;
     GameState.netMode = NetMode.CLIENT;
+    this.#startBackgroundTicker();
     console.log(`NetworkManager: joined relay session '${sessionCode}' as peer ${this.peerId}; awaiting host welcome...`);
 
     const welcome = new Promise<IPCMessage>((resolve) => {
@@ -141,6 +177,7 @@ export class NetworkManager {
   }
 
   static disconnect(): void {
+    this.#stopBackgroundTicker();
     if(this.session){
       this.session.disconnect();
       this.session = undefined;
@@ -150,6 +187,8 @@ export class NetworkManager {
     this.hostModule = '';
     this.rtt = -1;
     this.#welcomeResolve = undefined;
+    CoopHostReplicator.reset();
+    CoopClientMirror.reset();
     GameState.netMode = NetMode.NONE;
     this.processEventListener('disconnected', []);
   }
@@ -173,6 +212,12 @@ export class NetworkManager {
         this.session?.broadcast(ping);
       }
     }
+
+    if(this.isHost()){
+      CoopHostReplicator.update(delta);
+    }else if(this.isClient()){
+      CoopClientMirror.update(delta);
+    }
   }
 
   /** Relay-control messages (transport-level joins/leaves). */
@@ -188,6 +233,7 @@ export class NetworkManager {
       case 'left':
         if(this.isHost() && typeof ctrl.peerId === 'number'){
           this.peers.delete(ctrl.peerId);
+          CoopHostReplicator.onPeerLeft(ctrl.peerId);
           console.log(`NetworkManager: peer ${ctrl.peerId} left`);
           this.processEventListener('peer-left', [ctrl.peerId]);
         }
@@ -218,7 +264,9 @@ export class NetworkManager {
         break;
       case IPCMessageType.Object:
       case IPCMessageType.Module:
-        // Client-side world replication — implemented in phase 2 (mirror).
+        if(this.isClient()){
+          CoopClientMirror.handleMessage(msg);
+        }
         break;
       default:
         console.warn(`NetworkManager: unhandled message type 0x${msg.type.toString(16)}.${msg.subType}`);
@@ -249,6 +297,8 @@ export class NetworkManager {
         );
         console.log(`NetworkManager: peer ${senderPeerId} ('${name}') completed handshake`);
         this.processEventListener('peer-ready', [senderPeerId]);
+        //Phase 2: stream the party + module so the peer can mirror the world.
+        CoopHostReplicator.onPeerReady(senderPeerId);
         break;
       }
       case IPCMessageTypeSession.Welcome: {
@@ -277,6 +327,18 @@ export class NetworkManager {
           if(peer){ peer.rtt = rtt; }
         }else{
           this.rtt = rtt;
+        }
+        break;
+      }
+      case IPCMessageTypeSession.PartyMember: {
+        if(this.isClient()){
+          CoopClientMirror.handleMessage(msg);
+        }
+        break;
+      }
+      case IPCMessageTypeSession.ClientReady: {
+        if(this.isHost()){
+          CoopHostReplicator.onClientReady(senderPeerId);
         }
         break;
       }
