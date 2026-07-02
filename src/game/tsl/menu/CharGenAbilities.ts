@@ -228,8 +228,66 @@ export class CharGenAbilities extends K1_CharGenAbilities {
         this.updateButtonStates();
       });
 
+      //Hovering an attribute row selects it: cost + description update (retail behavior)
+      const attrs: [CharGenAttribute, string][] = [
+        [CharGenAttribute.STR, 'STR'], [CharGenAttribute.DEX, 'DEX'], [CharGenAttribute.CON, 'CON'],
+        [CharGenAttribute.INT, 'INT'], [CharGenAttribute.WIS, 'WIS'], [CharGenAttribute.CHA, 'CHA'],
+      ];
+      for(const [attr, prefix] of attrs){
+        for(const name of [`${prefix}_LBL`, `${prefix}_POINTS_BTN`]){
+          this.getControlByName(name)?.addEventListener('hover', () => {
+            this.updateAttributeSelection(attr);
+          });
+        }
+      }
+
       resolve();
     });
   }
-  
+
+  /** TLK string refs of the attribute descriptions (retail hardcodes these). */
+  static ATTRIBUTE_DESC_STRREF: {[key: number]: number} = {
+    [CharGenAttribute.STR]: 222,
+    [CharGenAttribute.DEX]: 223,
+    [CharGenAttribute.CON]: 224,
+    [CharGenAttribute.WIS]: 225,
+    [CharGenAttribute.INT]: 226,
+    [CharGenAttribute.CHA]: 227,
+  };
+
+  selectedAttribute: CharGenAttribute = CharGenAttribute.STR;
+
+  updateAttributeSelection(attr: CharGenAttribute){
+    this.selectedAttribute = attr;
+    const strref = CharGenAbilities.ATTRIBUTE_DESC_STRREF[attr];
+    const desc = GameState.TLKManager.TLKStrings[strref]?.Value ?? '';
+    this.LB_DESC.setItem(desc);
+    this.COST_POINTS_LBL.setText(this.getAttributeCost(attr).toString());
+  }
+
+  updateButtonStates(){
+    super.updateButtonStates();
+    //Per-row ability modifier column (LBL_BONUS_*, TSL-only .gui controls;
+    //shows '00' authored placeholder otherwise)
+    const mod = (score: number) => {
+      const m = Math.floor((score - 10) / 2);
+      return m > 0 ? `+${m}` : `${m}`;
+    };
+    const cgm = GameState.CharGenManager;
+    this.getControlByName('LBL_BONUS_STR')?.setText(mod(cgm.str));
+    this.getControlByName('LBL_BONUS_DEX')?.setText(mod(cgm.dex));
+    this.getControlByName('LBL_BONUS_CON')?.setText(mod(cgm.con));
+    this.getControlByName('LBL_BONUS_INT')?.setText(mod(cgm.int));
+    this.getControlByName('LBL_BONUS_WIS')?.setText(mod(cgm.wis));
+    this.getControlByName('LBL_BONUS_CHA')?.setText(mod(cgm.cha));
+    //Selected attribute's next-point cost
+    this.COST_POINTS_LBL.setText(this.getAttributeCost(this.selectedAttribute).toString());
+  }
+
+  show(){
+    super.show();
+    //Retail opens with Strength selected: cost + description populated
+    this.updateAttributeSelection(CharGenAttribute.STR);
+  }
+
 }

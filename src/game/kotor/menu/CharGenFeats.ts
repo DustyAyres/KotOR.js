@@ -113,9 +113,8 @@ export class CharGenFeats extends GameMenu {
       const display = this.selectedFeat || node[0];
       if(display){
         if(this.LBL_NAME) this.LBL_NAME.setText(this.getFeatName(display));
-        if(this.LB_DESC && typeof (this.LB_DESC as any).setText === 'function'){
-          (this.LB_DESC as any).setText(this.getFeatDescription(display));
-        }
+        //GUIListBox has no setText — setItem is the single-content API
+        if(this.LB_DESC) this.LB_DESC.setItem(this.getFeatDescription(display));
       }
     }
   }

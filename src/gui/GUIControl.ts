@@ -2319,12 +2319,11 @@ export class GUIControl {
     // const horizontal = this.text.alignment & GUIControlAlignment.HorizontalMask;
     this.widget.userData.text.position.x = -(innerSize.width/2 - this.textSize.x/2) - this.textSize.x/2;
 
-    let vertical   = this.text.alignment & GUIControlAlignment.VerticalMask;
-    //Overflowing clipped text anchors to the top of the box so the start of
-    //the content is what stays visible (center anchoring would bleed both ways)
-    if(this.textClipToExtent && this.textSize.y > innerSize.height){
-      vertical = GUIControlAlignment.VerticalTop;
-    }
+    const vertical   = this.text.alignment & GUIControlAlignment.VerticalMask;
+    //Overflowing clipped text keeps its authored anchoring: retail (RE'd from
+    //swkotor2 CAurGUIStringInternal::Draw) centers the wrapped block and drops
+    //the lines outside the box, i.e. shows the centered middle slice — the
+    //clipping planes reproduce that window here.
     switch(vertical){
       case GUIControlAlignment.VerticalTop:
         this.widget.userData.text.position.y = (innerSize.height/2 - this.textSize.y/2) + this.textSize.y/2;

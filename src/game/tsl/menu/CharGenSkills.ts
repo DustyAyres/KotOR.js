@@ -154,9 +154,74 @@ export class CharGenSkills extends K1_CharGenSkills {
         });
       });
 
+      //Hovering a skill row selects it: cost, class/cross-class header and
+      //description update (retail behavior)
+      const rowPrefixes = ['COMPUTER_USE','DEMOLITIONS','STEALTH','AWARENESS','PERSUADE','REPAIR','SECURITY','TREAT_INJURY'];
+      rowPrefixes.forEach((prefix, skillIndex) => {
+        for(const name of [`${prefix}_LBL`, `${prefix}_POINTS_BTN`]){
+          this.getControlByName(name)?.addEventListener('hover', () => {
+            this.updateSkillSelection(skillIndex);
+          });
+        }
+      });
+
       this.updateButtonStates();
       resolve();
     });
   }
-  
+
+  selectedSkill: number = 0;
+
+  updateSkillSelection(skillIndex: number){
+    this.selectedSkill = skillIndex;
+    const cg: any = GameState.CharGenManager;
+    const cost = cg.getSkillCost(skillIndex);
+    this.COST_POINTS_LBL.setText(cost.toString());
+    this.CLASSSKL_LBL.setText(cost > 1 ? 'Cross-Class Skill' : 'Class Skill');
+
+    const row: any = GameState.TwoDAManager.datatables.get('skills')?.rows[skillIndex];
+    if(row){
+      const attrNames: {[key: string]: string} = {
+        STR: 'Strength', DEX: 'Dexterity', CON: 'Constitution',
+        INT: 'Intelligence', WIS: 'Wisdom', CHA: 'Charisma',
+      };
+      const related = attrNames[(row.keyability ?? '').toUpperCase()] ?? row.keyability ?? '';
+      const desc = GameState.TLKManager.TLKStrings[parseInt(row.description)]?.Value ?? '';
+      this.LB_DESC.setItem(`Related Attribute: ${related}\n\n${desc}`);
+    }
+  }
+
+  updateButtonStates(){
+    super.updateButtonStates();
+    const cg: any = GameState.CharGenManager;
+    const rows: Array<[GUIButton, GUIButton, string]> = [
+      [this.COM_MINUS_BTN, this.COM_PLUS_BTN, 'computerUse'],
+      [this.DEM_MINUS_BTN, this.DEM_PLUS_BTN, 'demolitions'],
+      [this.STE_MINUS_BTN, this.STE_PLUS_BTN, 'stealth'],
+      [this.AWA_MINUS_BTN, this.AWA_PLUS_BTN, 'awareness'],
+      [this.PER_MINUS_BTN, this.PER_PLUS_BTN, 'persuade'],
+      [this.REP_MINUS_BTN, this.REP_PLUS_BTN, 'repair'],
+      [this.SEC_MINUS_BTN, this.SEC_PLUS_BTN, 'security'],
+      [this.TRE_MINUS_BTN, this.TRE_PLUS_BTN, 'treatInjury'],
+    ];
+    //Retail hides - at rank 0 and + when unaffordable/at the rank cap
+    rows.forEach(([minusBtn, plusBtn, key], skillIndex) => {
+      if(!minusBtn || !plusBtn){ return; }
+      if((cg[key] ?? 0) <= 0){ minusBtn.hide(); }else{ minusBtn.show(); }
+      if(cg.getSkillCost(skillIndex) > cg.availSkillPoints || cg[key] >= cg.getSkillMaxRank(skillIndex)){
+        plusBtn.hide();
+      }else{
+        plusBtn.show();
+      }
+    });
+    this.COST_POINTS_LBL.setText(cg.getSkillCost(this.selectedSkill).toString());
+  }
+
+  show(){
+    super.show();
+    //Retail opens with the first skill selected (header/cost/description populated)
+    this.updateSkillSelection(0);
+    this.updateButtonStates();
+  }
+
 }

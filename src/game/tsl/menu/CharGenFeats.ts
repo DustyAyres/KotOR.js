@@ -95,6 +95,10 @@ export class CharGenFeats extends K1_CharGenFeats {
 
     super.show(); // addGrantedFeats() + LB_FEATS proto + buildFeatList()
     this.updateRemaining();
+
+    //Retail opens with the first feat chain highlighted (name + description populated)
+    const firstNode: any = (this.LB_FEATS as any).children?.[0]?.node;
+    if(firstNode){ this.onFeatHighlight(firstNode); }
   }
 
   /** Highlight handler: pick the lowest tier in the chain the creature can still take. */
@@ -110,9 +114,8 @@ export class CharGenFeats extends K1_CharGenFeats {
       const display = this.selectedFeat || node[0];
       if(display){
         if(this.LBL_NAME) this.LBL_NAME.setText(this.getFeatName(display));
-        if(this.LB_DESC && typeof (this.LB_DESC as any).setText === 'function'){
-          (this.LB_DESC as any).setText(this.getFeatDescription(display));
-        }
+        //GUIListBox has no setText — setItem is the single-content API
+        if(this.LB_DESC) this.LB_DESC.setItem(this.getFeatDescription(display));
       }
     }
   }
