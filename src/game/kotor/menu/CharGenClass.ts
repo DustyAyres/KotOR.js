@@ -318,6 +318,11 @@ export class CharGenClass extends GameMenu {
 
   show() {
     super.show();
+    //The .gui bakes placeholder text into LBL_CLASS (TSL: strref 135
+    //'Scoundrel' left over from K1) — populate the labels for the currently
+    //hovered class immediately, like retail does at runtime.
+    this.LBL_DESC?.enableTextClipping();
+    this.textNeedsUpdate = true;
   }
 
   async Init() {

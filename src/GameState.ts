@@ -538,6 +538,8 @@ export class GameState implements EngineContext {
     }) as THREE.WebGLRenderer;
 
     
+    //Per-material clipping planes (GUI label text overflow containment)
+    GameState.renderer.localClippingEnabled = true;
     GameState.renderer.autoClear = false;
     GameState.renderer.setSize( GameState.ResolutionManager.getViewportWidth(), GameState.ResolutionManager.getViewportHeight() );
     GameState.renderer.setClearColor(0x000000);

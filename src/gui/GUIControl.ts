@@ -2269,6 +2269,44 @@ export class GUIControl {
 
   textSize: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
 
+  /** Clip rendered text to the control's inner extent (labels whose content can overflow, e.g. class descriptions). */
+  textClipToExtent: boolean = false;
+  textClippingPlanes?: THREE.Plane[];
+
+  enableTextClipping(){
+    this.textClipToExtent = true;
+    this.updateTextClipping();
+  }
+
+  /**
+   * Keep the text material's clipping planes hugging the control's inner
+   * rect (world space). Without this, multi-line text taller than the
+   * authored extent sprawls over neighboring controls (e.g. the class-select
+   * description, authored 648x56 but fed ~9 line TLK stat blocks).
+   */
+  updateTextClipping(){
+    if(!this.textClipToExtent || !(this.text.material instanceof THREE.ShaderMaterial)){ return; }
+    if(!this.textClippingPlanes){
+      this.textClippingPlanes = [
+        new THREE.Plane(new THREE.Vector3(0, -1, 0), 0), //keep y <= top
+        new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),  //keep y >= bottom
+      ];
+    }
+    this.widget.updateWorldMatrix(true, false);
+    const world = new THREE.Vector3();
+    this.widget.getWorldPosition(world);
+    const scale = new THREE.Vector3();
+    this.widget.getWorldScale(scale);
+    const halfH = (this.getInnerSize().height / 2) * scale.y;
+    this.textClippingPlanes[0].constant = world.y + halfH;
+    this.textClippingPlanes[1].constant = -(world.y - halfH);
+    if(this.text.material.clippingPlanes !== this.textClippingPlanes){
+      this.text.material.clippingPlanes = this.textClippingPlanes;
+      this.text.material.clipping = true;
+      this.text.material.needsUpdate = true;
+    }
+  }
+
   alignText(){
     if(this.text.geometry && this.text.geometry.boundingBox){
       this.text.geometry.boundingBox.getSize(this.textSize);
@@ -2281,7 +2319,12 @@ export class GUIControl {
     // const horizontal = this.text.alignment & GUIControlAlignment.HorizontalMask;
     this.widget.userData.text.position.x = -(innerSize.width/2 - this.textSize.x/2) - this.textSize.x/2;
 
-    const vertical   = this.text.alignment & GUIControlAlignment.VerticalMask;
+    let vertical   = this.text.alignment & GUIControlAlignment.VerticalMask;
+    //Overflowing clipped text anchors to the top of the box so the start of
+    //the content is what stays visible (center anchoring would bleed both ways)
+    if(this.textClipToExtent && this.textSize.y > innerSize.height){
+      vertical = GUIControlAlignment.VerticalTop;
+    }
     switch(vertical){
       case GUIControlAlignment.VerticalTop:
         this.widget.userData.text.position.y = (innerSize.height/2 - this.textSize.y/2) + this.textSize.y/2;
@@ -2306,7 +2349,9 @@ export class GUIControl {
       this.resizeControl();
       this.list.relayoutAfterRowHeightChange();
     }
-    
+
+    this.updateTextClipping();
+
   }
 
   disableBorder(){
