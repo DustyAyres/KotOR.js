@@ -938,6 +938,19 @@ export class GameState implements EngineContext {
     this.EventOnResize();
   }
 
+  /**
+   * The creature the LOCAL human is controlling. Single-player/host: the
+   * party leader (getCurrentPlayer). Co-op client: the claimed party member.
+   * Camera and (client-side) input/UI should key off this, NOT
+   * getCurrentPlayer(), which stays "the party leader" for engine logic.
+   */
+  public static getLocalControlledCreature(): ModuleCreature {
+    if(GameState.netMode == NetMode.CLIENT && GameState.NetworkManager?.controlledCreature){
+      return GameState.NetworkManager.controlledCreature;
+    }
+    return GameState.getCurrentPlayer();
+  }
+
   public static getCurrentPlayer(): ModuleCreature {
     if(GameState.Mode == EngineMode.MINIGAME){
       return GameState.module.area.miniGame.player as any;

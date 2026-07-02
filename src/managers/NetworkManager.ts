@@ -2,7 +2,10 @@ import { GameState } from "@/GameState";
 import { NetMode } from "@/enums/engine/NetMode";
 import { IPCMessageType } from "@/enums/server/ipc/IPCMessageType";
 import { IPCMessageTypeSession } from "@/enums/server/ipc/IPCMessageTypeSession";
+import { IPCMessageTypeCommand } from "@/enums/server/ipc/IPCMessageTypeCommand";
 import { IPCMessage } from "@/server/ipc/IPCMessage";
+import { TURN_SPEED_FAST } from "@/engine/TurnSpeeds";
+import type { ModuleCreature } from "@/module";
 import { CoopSession } from "@/network/CoopSession";
 import { CoopHostReplicator } from "@/network/CoopHostReplicator";
 import { CoopClientMirror } from "@/network/CoopClientMirror";
@@ -23,6 +26,16 @@ import {
  * @license {@link https://www.gnu.org/licenses/gpl-3.0.txt|GPLv3}
  */
 
+export interface ICoopMoveIntent {
+  /** World-space heading in radians. */
+  heading: number;
+  run: boolean;
+  /** performance.now() the intent was (re)received; stale intents stop applying. */
+  receivedAt: number;
+  /** Whether the initial clearAllActions has run for this movement burst. */
+  started: boolean;
+}
+
 export interface ICoopPeer {
   peerId: number;
   name: string;
@@ -32,9 +45,17 @@ export interface ICoopPeer {
   rtt: number;
   /** ModuleObject.id of the party member this peer controls (-1 = none). */
   controlledObjectId: number;
+  /** Host-side: the claimed creature (resolved on ClaimSlot). */
+  controlledCreature?: ModuleCreature;
+  /** Host-side: latest held-key steering intent from this peer. */
+  moveIntent?: ICoopMoveIntent;
 }
 
 const PING_INTERVAL_MS = 2000;
+/** MoveDir keepalive: client re-sends while held; host stops applying after this. */
+const MOVE_INTENT_STALE_MS = 400;
+const MOVE_SEND_INTERVAL_MS = 100;
+const MOVE_HEADING_EPSILON = 0.05;
 
 export class NetworkManager {
 
@@ -51,6 +72,15 @@ export class NetworkManager {
   static #pendingPingSentAt: number = -1;
   /** Client-side rtt to host in ms (-1 = not yet measured). */
   static rtt: number = -1;
+
+  /** Client-side: party slot this client controls (-1 = spectator). */
+  static controlledSlot: number = -1;
+  /** Client-side: the local mirror of the claimed party member. */
+  static controlledCreature: ModuleCreature | undefined;
+  static #moveIntent: { heading: number; run: boolean } | undefined;
+  static #moveActive = false;
+  static #lastMoveSentAt = 0;
+  static #lastSentHeading = NaN;
 
   static eventListeners: {[key: string]: Function[]} = {};
 
@@ -187,6 +217,10 @@ export class NetworkManager {
     this.hostModule = '';
     this.rtt = -1;
     this.#welcomeResolve = undefined;
+    this.controlledSlot = -1;
+    this.controlledCreature = undefined;
+    this.#moveIntent = undefined;
+    this.#moveActive = false;
     CoopHostReplicator.reset();
     CoopClientMirror.reset();
     GameState.netMode = NetMode.NONE;
@@ -214,9 +248,77 @@ export class NetworkManager {
     }
 
     if(this.isHost()){
+      this.applyPeerMoveIntents();
       CoopHostReplicator.update(delta);
     }else if(this.isClient()){
+      this.flushClientMoveIntent();
       CoopClientMirror.update(delta);
+    }
+  }
+
+  /**
+   * Client: register this frame's held-key steering (called from the input
+   * processors each frame the key is held; world-space heading).
+   */
+  static clientMoveIntent(heading: number, run: boolean): void {
+    if(!this.isClient() || this.controlledSlot < 0){ return; }
+    this.#moveIntent = { heading, run };
+  }
+
+  /** Client: throttle + send MoveDir while held; MoveStop on release. */
+  static flushClientMoveIntent(): void {
+    const now = performance.now();
+    if(this.#moveIntent){
+      const headingChanged = Math.abs(this.#moveIntent.heading - this.#lastSentHeading) > MOVE_HEADING_EPSILON;
+      if(!this.#moveActive || headingChanged || (now - this.#lastMoveSentAt) > MOVE_SEND_INTERVAL_MS){
+        this.session?.sendToHost(
+          new IPCMessage(IPCMessageType.Command, IPCMessageTypeCommand.MoveDir)
+            .addFloat(this.#moveIntent.heading)
+            .addInt(this.#moveIntent.run ? 1 : 0)
+        );
+        this.#lastMoveSentAt = now;
+        this.#lastSentHeading = this.#moveIntent.heading;
+        this.#moveActive = true;
+      }
+      this.#moveIntent = undefined;
+    }else if(this.#moveActive){
+      this.#moveActive = false;
+      this.#lastSentHeading = NaN;
+      this.session?.sendToHost(new IPCMessage(IPCMessageType.Command, IPCMessageTypeCommand.MoveStop));
+    }
+  }
+
+  /** Client: claim a party member by index (1..2; slot 0 is the host's leader). */
+  static claimSlot(slot: number): void {
+    if(!this.isClient()){ return; }
+    this.session?.sendToHost(
+      new IPCMessage(IPCMessageType.Session, IPCMessageTypeSession.ClaimSlot).addInt(slot)
+    );
+  }
+
+  /**
+   * Host: apply fresh steering intents to owned creatures every sim frame
+   * (the engine resets force/controlled per tick, so intents re-apply like
+   * held keys do).
+   */
+  static applyPeerMoveIntents(): void {
+    const now = performance.now();
+    for(const peer of this.peers.values()){
+      const creature = peer.controlledCreature;
+      const intent = peer.moveIntent;
+      if(!creature || !intent){ continue; }
+      if((now - intent.receivedAt) > MOVE_INTENT_STALE_MS){
+        peer.moveIntent = undefined;
+        continue;
+      }
+      if(!creature.canMove()){ continue; }
+      if(!intent.started){
+        intent.started = true;
+        creature.clearAllActions(true);
+      }
+      creature.force = 1;
+      creature.setFacing(intent.heading, false, TURN_SPEED_FAST);
+      creature.controlled = true;
     }
   }
 
@@ -232,6 +334,8 @@ export class NetworkManager {
         break;
       case 'left':
         if(this.isHost() && typeof ctrl.peerId === 'number'){
+          const peer = this.peers.get(ctrl.peerId);
+          if(peer){ this.releaseSlot(peer); }
           this.peers.delete(ctrl.peerId);
           CoopHostReplicator.onPeerLeft(ctrl.peerId);
           console.log(`NetworkManager: peer ${ctrl.peerId} left`);
@@ -260,7 +364,7 @@ export class NetworkManager {
         this.handleSessionMessage(senderPeerId, msg);
         break;
       case IPCMessageType.Command:
-        // Host-side player intent — implemented in phase 3 (owned movement).
+        this.handleCommandMessage(senderPeerId, msg);
         break;
       case IPCMessageType.Object:
       case IPCMessageType.Module:
@@ -342,9 +446,148 @@ export class NetworkManager {
         }
         break;
       }
+      case IPCMessageTypeSession.ClaimSlot: {
+        if(!this.isHost()){ break; }
+        const slot = msg.intAt(0);
+        const peer = this.peers.get(senderPeerId);
+        const party = GameState.PartyManager.party;
+        const creature = party[slot];
+        if(!peer || !creature){ break; }
+        if(slot == 0){
+          console.warn(`NetworkManager: peer ${senderPeerId} tried to claim the leader slot — denied`);
+          break;
+        }
+        if(creature.ownerPeerId >= 0 && creature.ownerPeerId != senderPeerId){
+          console.warn(`NetworkManager: slot ${slot} already claimed by peer ${creature.ownerPeerId}`);
+          break;
+        }
+        //Release any previous claim by this peer
+        if(peer.controlledCreature && peer.controlledCreature != creature){
+          this.releaseSlot(peer);
+        }
+        creature.ownerPeerId = senderPeerId;
+        creature.clearAllActions(true);
+        //Make sure the claimed member is standing on the walkmesh — an
+        //off-mesh (room-less) creature cannot move at all.
+        if(!creature.room){
+          creature.getCurrentRoom();
+          if(!creature.room){
+            const leader = GameState.PartyManager.party[0];
+            if(leader && leader != creature){
+              creature.position.copy(leader.position);
+              creature.getCurrentRoom();
+            }
+          }
+        }
+        peer.controlledCreature = creature;
+        peer.controlledObjectId = creature.id;
+        this.session?.broadcast(
+          new IPCMessage(IPCMessageType.Session, IPCMessageTypeSession.SlotAssigned)
+            .addInt(senderPeerId)
+            .addObjectId(creature.id)
+            .addInt(slot)
+        );
+        console.log(`NetworkManager: peer ${senderPeerId} claimed party slot ${slot} ('${creature.getName?.() ?? creature.tag}')`);
+        this.processEventListener('slot-assigned', [senderPeerId, slot]);
+        break;
+      }
+      case IPCMessageTypeSession.SlotAssigned: {
+        if(!this.isClient()){ break; }
+        const forPeerId = msg.intAt(0);
+        const slot = msg.intAt(2);
+        const creature = GameState.PartyManager.party[slot];
+        if(creature){ creature.ownerPeerId = forPeerId; }
+        if(forPeerId == this.peerId){
+          this.controlledSlot = slot;
+          this.controlledCreature = creature;
+          console.log(`NetworkManager: we now control party slot ${slot} ('${creature?.getName?.() ?? creature?.tag}')`);
+        }
+        this.processEventListener('slot-assigned', [forPeerId, slot]);
+        break;
+      }
+      case IPCMessageTypeSession.SlotReleased: {
+        if(!this.isClient()){ break; }
+        const forPeerId = msg.intAt(0);
+        for(const member of GameState.PartyManager.party){
+          if(member.ownerPeerId == forPeerId){ member.ownerPeerId = -1; }
+        }
+        if(forPeerId == this.peerId){
+          this.controlledSlot = -1;
+          this.controlledCreature = undefined;
+        }
+        this.processEventListener('slot-released', [forPeerId]);
+        break;
+      }
       default:
-        // ClaimSlot/SlotAssigned/SetPause/SlotReleased land in phases 3-4.
+        // SetPause lands in phase 4.
         break;
     }
+  }
+
+  /** Host: validated client→host intent for the peer's claimed creature. */
+  static handleCommandMessage(senderPeerId: number, msg: IPCMessage): void {
+    if(!this.isHost()){ return; }
+    const peer = this.peers.get(senderPeerId);
+    const creature = peer?.controlledCreature;
+    if(!peer || !creature || creature.ownerPeerId != senderPeerId){ return; }
+
+    switch(msg.subType){
+      case IPCMessageTypeCommand.MoveDir: {
+        const started = peer.moveIntent?.started ?? false;
+        peer.moveIntent = {
+          heading: msg.floatAt(0),
+          run: !!msg.intAt(1),
+          receivedAt: performance.now(),
+          started,
+        };
+        break;
+      }
+      case IPCMessageTypeCommand.MoveStop: {
+        peer.moveIntent = undefined;
+        break;
+      }
+      case IPCMessageTypeCommand.Attack: {
+        const target = GameState.ModuleObjectManager.GetObjectById(msg.objectIdAt(0));
+        if(target && !target.isDead?.()){
+          peer.moveIntent = undefined;
+          creature.clearAllActions(true);
+          creature.attackCreature(target as any);
+        }
+        break;
+      }
+      case IPCMessageTypeCommand.UseObject: {
+        const target: any = GameState.ModuleObjectManager.GetObjectById(msg.objectIdAt(0));
+        if(!target){ break; }
+        peer.moveIntent = undefined;
+        creature.clearAllActions(true);
+        if(typeof target.setOpenState === 'function' && typeof target.openDoor === 'function'){
+          creature.actionOpenDoor(target);
+        }else{
+          creature.actionUseObject(target);
+        }
+        break;
+      }
+      case IPCMessageTypeCommand.ClearActions: {
+        peer.moveIntent = undefined;
+        creature.clearAllActions(true);
+        break;
+      }
+    }
+  }
+
+  /** Host: release a peer's claimed creature back to companion AI. */
+  static releaseSlot(peer: ICoopPeer): void {
+    const creature = peer.controlledCreature;
+    if(creature){
+      creature.ownerPeerId = -1;
+      creature.clearAllActions(true);
+      this.session?.broadcast(
+        new IPCMessage(IPCMessageType.Session, IPCMessageTypeSession.SlotReleased).addInt(peer.peerId)
+      );
+      console.log(`NetworkManager: released party member '${creature.getName?.() ?? creature.tag}' from peer ${peer.peerId}`);
+    }
+    peer.controlledCreature = undefined;
+    peer.controlledObjectId = -1;
+    peer.moveIntent = undefined;
   }
 }

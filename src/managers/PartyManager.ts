@@ -986,6 +986,21 @@ export class PartyManager {
         GameState.group.party.add( partyMember.container );
 
         partyMember.onSpawn();
+
+        //Bind to the walkmesh: the formation offset can land off-mesh in
+        //cramped areas (esp. mid-session party injection), leaving the member
+        //room-less — findWalkableFace never matches and ALL movement no-ops.
+        //Snap to the leader's (guaranteed walkable) spot as a fallback; at
+        //module load the walkmeshes may not be ready yet, in which case the
+        //per-frame roomCheck binds it later as before.
+        partyMember.getCurrentRoom();
+        if(!partyMember.room){
+          const leader = PartyManager.party[0];
+          if(leader && leader != partyMember){
+            partyMember.position.copy(leader.position);
+            partyMember.getCurrentRoom();
+          }
+        }
       }else{
         const spawn = PartyManager.GetSpawnLocation(currentSlot);
         currentSlot.position.copy(spawn.position);

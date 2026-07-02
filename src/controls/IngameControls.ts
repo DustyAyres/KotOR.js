@@ -4,6 +4,7 @@ import type { GUIControl, GUIListBox, GUIScrollBar } from "@/gui";
 import { Utility } from "@/utility/Utility";
 import { EngineMode } from "@/enums/engine/EngineMode";
 import { EngineState } from "@/enums/engine/EngineState";
+import { NetMode } from "@/enums/engine/NetMode";
 import { KeyMapAction } from "@/enums/controls/KeyMapAction";
 import { MiniGameType } from "@/enums/engine/MiniGameType";
 import { FollowerCamera } from "@/engine/FollowerCamera";
@@ -405,6 +406,16 @@ export class IngameControls {
       if(GameState.State == EngineState.PAUSED) return;
       if(!keymap.keyboardInput?.down) return;
       if(this.gamePadMovement) return;
+
+      //Co-op client: movement is an intent streamed to the host for the
+      //claimed member (position echoes back via replication).
+      if(GameState.netMode == NetMode.CLIENT){
+        GameState.NetworkManager.clientMoveIntent(Utility.NormalizeRadian(FollowerCamera.facing + Math.PI/2), true);
+        GameState.scene_cursor_holder.visible = true;
+        FollowerCamera.clearFocusObject();
+        return;
+      }
+
       const followee = GameState.PartyManager.party[0];
       if(!followee) return;
       if(!followee.canMove()) return;
@@ -422,10 +433,18 @@ export class IngameControls {
       if(GameState.State == EngineState.PAUSED) return;
       if(!keymap.keyboardInput?.down) return;
       if(this.gamePadMovement) return;
+
+      if(GameState.netMode == NetMode.CLIENT){
+        GameState.NetworkManager.clientMoveIntent(Utility.NormalizeRadian(FollowerCamera.facing - Math.PI/2), true);
+        GameState.scene_cursor_holder.visible = true;
+        FollowerCamera.clearFocusObject();
+        return;
+      }
+
       const followee = GameState.PartyManager.party[0];
       if(!followee) return;
       if(!followee.canMove()) return;
-      
+
       followee.clearAllActions(true);
       followee.force = 1;
       followee.setFacing(Utility.NormalizeRadian(FollowerCamera.facing - Math.PI/2), false, TURN_SPEED_FAST);

@@ -279,6 +279,16 @@ export class AppState {
       if(coop === 'join'){
         try{
           await KotOR.NetworkManager.join(coopAddr, coopSession, q.get('name') || 'player');
+          //&claim=N: auto-claim a party slot once the world mirror is ready
+          const claim = parseInt(q.get('claim') || '', 10);
+          if(!isNaN(claim)){
+            const waitReady = setInterval(() => {
+              if(KotOR.CoopClientMirror.ready){
+                clearInterval(waitReady);
+                KotOR.NetworkManager.claimSlot(claim);
+              }
+            }, 250);
+          }
         }catch(e){
           console.error('coop: join failed', e);
         }

@@ -87,7 +87,7 @@ export class FollowerCamera {
 
     FollowerCamera.turning = false;
 
-    let followee = GameState.getCurrentPlayer();
+    let followee = GameState.getLocalControlledCreature();
     if(!followee) return;
 
     if(FollowerCamera.focusObject){

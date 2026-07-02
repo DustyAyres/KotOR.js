@@ -73,6 +73,13 @@ export class ModuleObject {
   combatOrder: number;
   combatRoundTimer: number;
   controlled: boolean;
+  /**
+   * Co-op: peer id of the connected player controlling this object (-1 = not
+   * remote-owned). Persistent, unlike the per-frame `controlled` flag. On the
+   * host it suppresses companion AI and routes Commands; replicated to
+   * clients via Session.SlotAssigned.
+   */
+  ownerPeerId: number = -1;
   id: number;
   initialized: boolean;
   isPlayer: boolean = false;
@@ -1631,6 +1638,13 @@ export class ModuleObject {
   triggerHeartbeat(){
     //Only allow the heartbeat script to run after the onspawn is called
     if(!(this.spawned === true && GameState.module.readyToProcessEvents)){
+      return;
+    }
+
+    //Co-op: heartbeat AI (ActionFollowLeader, combat AI scripts) is suppressed
+    //for members controlled by a connected player — their intent arrives as
+    //Commands instead.
+    if(this.ownerPeerId >= 0){
       return;
     }
 

@@ -700,7 +700,8 @@ export class ModuleCreature extends ModuleObject {
 
 
       //If a non controlled party member is stuck, warp them to their follow position
-      if(this.npcId != undefined && this != (GameState.getCurrentPlayer() as any) && this.collisionTimer >= 1){
+      //(skip members controlled by a co-op player — they steer themselves)
+      if(this.npcId != undefined && this != (GameState.getCurrentPlayer() as any) && this.ownerPeerId < 0 && this.collisionTimer >= 1){
         this.setPosition(GameState.PartyManager.GetFollowPosition(this));
         this.collisionTimer = 0;
       }
@@ -944,9 +945,10 @@ export class ModuleCreature extends ModuleObject {
     if(!(this.action)){
       const currentPlayer = GameState.getCurrentPlayer();
       if(
-        !this.combatData.combatState && 
-        this.isPartyMember() && 
-        this != currentPlayer && 
+        !this.combatData.combatState &&
+        this.isPartyMember() &&
+        this != currentPlayer &&
+        this.ownerPeerId < 0 &&
         !this.facingAnim
       ){
         this.lookAtObject = currentPlayer;
@@ -1100,8 +1102,9 @@ export class ModuleCreature extends ModuleObject {
     }
 
     if(this.combatData.combatState){
-      //If creature is being controller by the player, keep at least one basic action in the attack queue while attack target is still alive 
-      if(GameState.getCurrentPlayer() == this){
+      //If creature is being controller by the player, keep at least one basic action in the attack queue while attack target is still alive
+      //(co-op-owned members sustain like the player — their AI is suppressed)
+      if(GameState.getCurrentPlayer() == this || this.ownerPeerId >= 0){
         if(!this.combatRound.scheduledActionList.length && !this.combatRound.action){
           if( this.combatData.lastAttackTarget ){
             this.attackCreature(this.combatData.lastAttackTarget, undefined);
